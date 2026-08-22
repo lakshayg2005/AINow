@@ -10,9 +10,10 @@ import Contact from "./pages/Contact";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Dashboard from "./pages/Dashboard";
-import NewsletterDetails from "./pages/NewsletterDetails";
+import NewsletterDetail from "./pages/NewsletterDetails";
 import VerifyEmail from "./pages/VerifyEmail";
 import ProtectedRoute from "./components/ProtectedRoute";
+
 
 function App() {
   return (
@@ -43,9 +44,14 @@ function App() {
           }
         />
 
-        <Route path="/newsletter-details" element={<NewsletterDetails />} />
+        {/* <Route path="/newsletter-details" element={<NewsletterDetails />} /> */}
 
         <Route path="/verify-email" element={<VerifyEmail />} />
+
+        <Route
+  path="/newsletters/:id"
+  element={<NewsletterDetail />}
+/>
       </Routes>
     </BrowserRouter>
   );

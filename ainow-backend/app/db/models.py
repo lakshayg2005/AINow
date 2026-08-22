@@ -5,6 +5,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from typing import Optional
 
 from app.db.database import Base
+from pgvector.sqlalchemy import Vector
 
 
 class User(Base):
@@ -365,6 +366,16 @@ class Source(Base):
 
     published_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime,
+        nullable=True,
+    )
+
+    raw_content: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    embedding: Mapped[Optional[list[float]]] = mapped_column(
+        Vector(384),
         nullable=True,
     )
 

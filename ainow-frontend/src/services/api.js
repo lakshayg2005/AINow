@@ -126,3 +126,33 @@ export async function cancelSubscription(token) {
 
   return data
 }
+
+
+
+
+export async function getNewsletters() {
+  const response = await fetch(`${API_BASE_URL}/newsletters`)
+
+  const data = await response.json()
+
+  if (!response.ok) {
+    throw new Error(data.detail || "Failed to fetch newsletters")
+  }
+
+  return data
+}
+
+
+export async function getNewsletter(newsletterId) {
+  const response = await fetch(
+    `${API_BASE_URL}/newsletters/${newsletterId}`
+  )
+
+  const data = await response.json()
+
+  if (!response.ok) {
+    throw new Error(data.detail || "Failed to fetch newsletter")
+  }
+
+  return data
+}

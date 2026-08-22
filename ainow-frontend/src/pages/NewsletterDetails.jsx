@@ -1,54 +1,96 @@
-import { useParams } from "react-router-dom"
+import { useEffect, useState } from "react"
+import { Link, useParams } from "react-router-dom"
+import { getNewsletter } from "../services/api"
 
-function NewsletterDetails() {
+function NewsletterDetail() {
   const { id } = useParams()
+
+  const [newsletter, setNewsletter] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState("")
+
+  useEffect(() => {
+    async function loadNewsletter() {
+      try {
+        const data = await getNewsletter(id)
+        setNewsletter(data)
+      } catch (error) {
+        setError(error.message)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    loadNewsletter()
+  }, [id])
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-black text-white">
+        <p className="text-gray-400">
+          Loading newsletter...
+        </p>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-black px-6 py-24 text-white">
+        <p className="text-red-400">{error}</p>
+
+        <Link
+          to="/newsletters"
+          className="mt-6 inline-block text-gray-300 hover:text-white"
+        >
+          ← Back to newsletters
+        </Link>
+      </div>
+    )
+  }
 
   return (
     <main className="min-h-screen bg-black px-6 py-24 text-white">
+      <article className="mx-auto max-w-4xl">
 
-      <article className="mx-auto max-w-3xl">
+        <Link
+          to="/newsletters"
+          className="text-sm text-gray-500 hover:text-white"
+        >
+          ← Back to newsletters
+        </Link>
 
-        <p className="text-sm uppercase tracking-widest text-gray-500">
-          Newsletter #{id}
+        <p className="mt-10 text-sm uppercase tracking-widest text-gray-500">
+          Newsletter
         </p>
 
-        <h1 className="mt-6 text-5xl font-bold leading-tight">
-          The AI industry is moving faster than ever
+        <h1 className="mt-4 text-5xl font-bold">
+          {newsletter.title}
         </h1>
 
-        <p className="mt-6 text-gray-500">
-          August 22, 2026
-        </p>
-
-        <div className="mt-12 space-y-6 text-lg leading-8 text-gray-300">
-
-          <p>
-            Artificial intelligence continues to evolve at an incredible
-            pace. New models, research breakthroughs and products are
-            appearing every week.
+        {newsletter.published_at && (
+          <p className="mt-4 text-gray-500">
+            {new Date(newsletter.published_at).toLocaleDateString(
+              "en-US",
+              {
+                year: "numeric",
+                month: "long",
+                day: "numeric",
+              }
+            )}
           </p>
+        )}
 
-          <p>
-            This edition of AINow brings together the developments
-            that matter most and explains them without unnecessary
-            technical noise.
-          </p>
-
-          <h2 className="pt-8 text-3xl font-bold text-white">
-            What happened this week?
-          </h2>
-
-          <p>
-            This is where the actual newsletter content will eventually
-            come from our backend.
-          </p>
-
-        </div>
+        <div
+          className="prose prose-invert mt-12 max-w-none"
+          dangerouslySetInnerHTML={{
+            __html: newsletter.html_content,
+          }}
+        />
 
       </article>
-
     </main>
   )
 }
 
-export default NewsletterDetails
+export default NewsletterDetail

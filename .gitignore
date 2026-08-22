@@ -1,0 +1,21 @@
+# Environment & Secrets
+.env
+*.env
+ainow-backend/.env
+
+# Python & Virtual Environments
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+ainow-backend/venv/
+ainow-backend/__pycache__/
+
+# Frontend Dependencies & Builds
+node_modules/
+ainow-frontend/node_modules/
+ainow-frontend/dist/
+
+# IDE & System Files
+.vscode/
+.DS_Store

@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+psycopg[binary]
+pydantic-settings
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
+python-jose
+pgvector
+sentence-transformers
