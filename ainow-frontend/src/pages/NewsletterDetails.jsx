@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react"
-import { Link, useParams } from "react-router-dom"
+import {
+  Link,
+  useParams,
+} from "react-router-dom"
 import { getNewsletter } from "../services/api"
 
 function NewsletterDetail() {
@@ -14,8 +17,11 @@ function NewsletterDetail() {
       try {
         const data = await getNewsletter(id)
         setNewsletter(data)
-      } catch (error) {
-        setError(error.message)
+      } catch (err) {
+        setError(
+          err.message ||
+          "Unable to load newsletter."
+        )
       } finally {
         setLoading(false)
       }
@@ -26,69 +32,65 @@ function NewsletterDetail() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-black text-white">
-        <p className="text-gray-400">
-          Loading newsletter...
-        </p>
-      </div>
+      <main className="min-h-screen bg-black px-6 py-24 text-white">
+        <div className="mx-auto max-w-5xl">
+          <p className="text-gray-400">
+            Loading newsletter...
+          </p>
+        </div>
+      </main>
     )
   }
 
-  if (error) {
+  if (error || !newsletter) {
     return (
-      <div className="min-h-screen bg-black px-6 py-24 text-white">
-        <p className="text-red-400">{error}</p>
+      <main className="min-h-screen bg-black px-6 py-24 text-white">
+        <div className="mx-auto max-w-5xl">
+          <p className="text-red-400">
+            {error || "Newsletter not found."}
+          </p>
 
-        <Link
-          to="/newsletters"
-          className="mt-6 inline-block text-gray-300 hover:text-white"
-        >
-          ← Back to newsletters
-        </Link>
-      </div>
+          <Link
+            to="/newsletters"
+            className="mt-6 inline-block text-white"
+          >
+            ← Back to newsletters
+          </Link>
+        </div>
+      </main>
     )
   }
 
   return (
-    <main className="min-h-screen bg-black px-6 py-24 text-white">
-      <article className="mx-auto max-w-4xl">
+    <main className="min-h-screen bg-neutral-200 py-8">
 
-        <Link
-          to="/newsletters"
-          className="text-sm text-gray-500 hover:text-white"
-        >
-          ← Back to newsletters
-        </Link>
+      <div className="mx-auto max-w-[1100px] px-4">
 
-        <p className="mt-10 text-sm uppercase tracking-widest text-gray-500">
-          Newsletter
-        </p>
+        <div className="mb-6 flex items-center justify-between">
+          <Link
+            to="/newsletters"
+            className="text-sm font-medium text-black hover:underline"
+          >
+            ← Back to newsletters
+          </Link>
 
-        <h1 className="mt-4 text-5xl font-bold">
-          {newsletter.title}
-        </h1>
+          <span className="text-sm text-gray-600">
+            AINow
+          </span>
+        </div>
 
-        {newsletter.published_at && (
-          <p className="mt-4 text-gray-500">
-            {new Date(newsletter.published_at).toLocaleDateString(
-              "en-US",
-              {
-                year: "numeric",
-                month: "long",
-                day: "numeric",
-              }
-            )}
-          </p>
-        )}
+        <div className="overflow-hidden rounded-2xl bg-white shadow-xl">
 
-        <div
-          className="prose prose-invert mt-12 max-w-none"
-          dangerouslySetInnerHTML={{
-            __html: newsletter.html_content,
-          }}
-        />
+          <iframe
+            title={newsletter.title}
+            srcDoc={newsletter.html_content}
+            className="block h-[calc(100vh-120px)] min-h-[900px] w-full border-0"
+          />
 
-      </article>
+        </div>
+
+      </div>
+
     </main>
   )
 }

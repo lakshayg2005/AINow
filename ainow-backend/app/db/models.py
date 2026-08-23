@@ -8,6 +8,7 @@ from app.db.database import Base
 from pgvector.sqlalchemy import Vector
 
 
+
 class User(Base):
     __tablename__ = "users"
 
@@ -239,7 +240,10 @@ class NewsletterConcept(Base):
 class ResearchPaper(Base):
     __tablename__ = "research_papers"
 
-    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(
+        primary_key=True,
+        index=True,
+    )
 
     title: Mapped[str] = mapped_column(
         String(500),
@@ -264,6 +268,11 @@ class ResearchPaper(Base):
 
     published_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime,
+        nullable=True,
+    )
+
+    embedding: Mapped[Optional[list[float]]] = mapped_column(
+        Vector(384),
         nullable=True,
     )
 
@@ -446,3 +455,4 @@ class NewsletterDelivery(Base):
         Text,
         nullable=True,
     )
+

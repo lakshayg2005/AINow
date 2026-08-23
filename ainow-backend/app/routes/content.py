@@ -23,8 +23,9 @@ from app.schemas.content import (
     SourceCreateRequest,
     SourceResponse,
 )
+from app.schemas.research import ResearchCandidate
 from app.core.embeddings import generate_embedding
-
+# from app.services.research import check_source_freshness
 
 router = APIRouter(
     prefix="/content",
@@ -203,63 +204,30 @@ def create_source(
     source_data: SourceCreateRequest,
     db: Session = Depends(get_db),
 ):
-    # --------------------------------------------------
-    # 1. Exact duplicate check
-    # --------------------------------------------------
-
-    existing = (
-        db.query(Source)
-        .filter(Source.url == source_data.url)
-        .first()
+    candidate = ResearchCandidate(
+        title=source_data.title,
+        url=source_data.url,
+        source_name=source_data.source_name,
+        raw_content=source_data.raw_content,
+        published_at=source_data.published_at,
     )
 
-    if existing:
+    freshness = check_source_freshness(
+        candidate,
+        db,
+    )
+
+    if not freshness.is_fresh:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="A source with this URL already exists",
+            detail={
+                "message": "Source is not fresh",
+                "duplicate_reason": freshness.duplicate_reason,
+                "existing_source_id": freshness.existing_source_id,
+            },
         )
-
-    # --------------------------------------------------
-    # 2. Generate embedding
-    # --------------------------------------------------
 
     embedding = generate_embedding(source_data.raw_content)
-
-    # --------------------------------------------------
-    # 3. Semantic duplicate check
-    # --------------------------------------------------
-
-    similarity_limit = 0.20
-
-    semantic_match = (
-        db.query(
-            Source,
-            Source.embedding.cosine_distance(embedding).label("distance"),
-        )
-        .filter(Source.embedding.is_not(None))
-        .order_by(
-            Source.embedding.cosine_distance(embedding)
-        )
-        .first()
-    )
-
-    if semantic_match:
-        existing_source, distance = semantic_match
-
-        if distance <= similarity_limit:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "message": "This source appears semantically similar to previously stored content",
-                    "existing_source_id": existing_source.id,
-                    "existing_source_title": existing_source.title,
-                    "similarity_distance": float(distance),
-                },
-            )
-
-    # --------------------------------------------------
-    # 4. Save source
-    # --------------------------------------------------
 
     source = Source(
         url=source_data.url,

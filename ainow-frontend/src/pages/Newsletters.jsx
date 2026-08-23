@@ -12,8 +12,11 @@ function Newsletters() {
       try {
         const data = await getNewsletters()
         setNewsletters(data)
-      } catch (error) {
-        setError(error.message)
+      } catch (err) {
+        setError(
+          err.message ||
+          "Unable to load newsletters."
+        )
       } finally {
         setLoading(false)
       }
@@ -21,6 +24,30 @@ function Newsletters() {
 
     loadNewsletters()
   }, [])
+
+  if (loading) {
+    return (
+      <main className="min-h-screen bg-black px-6 py-24 text-white">
+        <div className="mx-auto max-w-7xl">
+          <p className="text-gray-400">
+            Loading newsletters...
+          </p>
+        </div>
+      </main>
+    )
+  }
+
+  if (error) {
+    return (
+      <main className="min-h-screen bg-black px-6 py-24 text-white">
+        <div className="mx-auto max-w-7xl">
+          <p className="text-red-400">
+            {error}
+          </p>
+        </div>
+      </main>
+    )
+  }
 
   return (
     <main className="min-h-screen bg-black px-6 py-24 text-white">
@@ -36,50 +63,45 @@ function Newsletters() {
           </h1>
 
           <p className="mt-6 text-lg leading-8 text-gray-400">
-            Explore previous editions of AINow and catch up on the latest
-            developments in artificial intelligence.
+            Explore previous editions of AINow
+            and catch up on the latest developments
+            in artificial intelligence.
           </p>
         </div>
 
-        {loading && (
-          <p className="mt-16 text-gray-500">
-            Loading newsletters...
-          </p>
-        )}
-
-        {error && (
-          <p className="mt-16 text-red-400">
-            {error}
-          </p>
-        )}
-
-        {!loading && !error && newsletters.length === 0 && (
-          <p className="mt-16 text-gray-500">
-            No newsletters have been published yet.
-          </p>
-        )}
-
-        {!loading && !error && newsletters.length > 0 && (
+        {newsletters.length === 0 ? (
+          <div className="mt-16 rounded-2xl border border-gray-800 p-8">
+            <p className="text-gray-400">
+              No published newsletters yet.
+            </p>
+          </div>
+        ) : (
           <div className="mt-16 grid gap-6 md:grid-cols-2">
+
             {newsletters.map((newsletter) => (
               <article
                 key={newsletter.id}
                 className="group rounded-2xl border border-gray-800 p-8 transition hover:border-gray-600"
               >
-                <div className="flex items-center justify-between">
+
+                <div className="flex items-center justify-between gap-4">
                   <span className="text-sm text-gray-500">
-                    {new Date(newsletter.published_at).toLocaleDateString(
-                      "en-US",
-                      {
-                        year: "numeric",
-                        month: "long",
-                        day: "numeric",
-                      }
-                    )}
+                    {newsletter.published_at
+                      ? new Date(
+                          newsletter.published_at
+                        ).toLocaleDateString(
+                          "en-US",
+                          {
+                            year: "numeric",
+                            month: "long",
+                            day: "numeric",
+                          }
+                        )
+                      : "Unpublished"}
                   </span>
 
                   <span className="rounded-full border border-gray-800 px-3 py-1 text-xs text-gray-400">
-                    AI
+                    AINow
                   </span>
                 </div>
 
@@ -87,14 +109,21 @@ function Newsletters() {
                   {newsletter.title}
                 </h2>
 
+                <p className="mt-4 leading-7 text-gray-400">
+                  A curated edition of the latest
+                  AI news, research, trends and tools.
+                </p>
+
                 <Link
                   to={`/newsletters/${newsletter.id}`}
-                  className="mt-8 inline-block font-medium text-white"
+                  className="mt-8 inline-block font-medium text-white hover:text-gray-300"
                 >
                   Read Newsletter →
                 </Link>
+
               </article>
             ))}
+
           </div>
         )}
 
