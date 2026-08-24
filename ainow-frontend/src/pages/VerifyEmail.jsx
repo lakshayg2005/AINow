@@ -1,58 +1,122 @@
-import { Link, useLocation } from "react-router-dom"
+import { useEffect, useState } from "react"
+import { Link, useSearchParams } from "react-router-dom"
+
+const API_BASE_URL = "http://127.0.0.1:8000"
 
 function VerifyEmail() {
-  const location = useLocation()
+  const [searchParams] = useSearchParams()
 
-  const email = location.state?.email || "your email address"
+  const [status, setStatus] = useState("verifying")
+  const [message, setMessage] = useState("")
+
+  useEffect(() => {
+    const token = searchParams.get("token")
+
+    if (!token) {
+      setStatus("error")
+      setMessage("Verification token is missing.")
+      return
+    }
+
+    let cancelled = false
+
+    async function verify() {
+      try {
+        const response = await fetch(
+          `${API_BASE_URL}/auth/verify-email?token=${encodeURIComponent(token)}`
+        )
+
+        const data = await response.json()
+
+        if (cancelled) {
+          return
+        }
+
+        if (!response.ok) {
+          throw new Error(
+            data.detail ||
+            "Email verification failed."
+          )
+        }
+
+        setStatus("success")
+        setMessage(data.message)
+      } catch (error) {
+        if (cancelled) {
+          return
+        }
+
+        setStatus("error")
+        setMessage(
+          error.message ||
+          "Email verification failed."
+        )
+      }
+    }
+
+    verify()
+
+    return () => {
+      cancelled = true
+    }
+  }, [searchParams])
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-black px-6 text-white">
-
+    <main className="flex min-h-screen items-center justify-center bg-black px-6 text-white">
       <div className="w-full max-w-md text-center">
 
-        {/* Icon */}
-        <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full border border-gray-800 text-2xl">
-          ✉
-        </div>
+        {status === "verifying" && (
+          <>
+            <h1 className="text-4xl font-bold">
+              Verifying your email...
+            </h1>
 
-        <h1 className="mt-8 text-4xl font-bold">
-          Check your inbox.
-        </h1>
+            <p className="mt-4 text-gray-400">
+              Please wait.
+            </p>
+          </>
+        )}
 
-        <p className="mt-4 leading-7 text-gray-400">
-          We've sent a verification link to
-        </p>
+        {status === "success" && (
+          <>
+            <h1 className="text-4xl font-bold">
+              Email verified.
+            </h1>
 
-        <p className="mt-2 font-medium text-white">
-          {email}
-        </p>
+            <p className="mt-4 text-gray-400">
+              {message}
+            </p>
 
-        <p className="mt-6 text-sm leading-6 text-gray-500">
-          Click the link in the email to verify your account.
-          Once your email is verified, you'll be able to login
-          to AINow.
-        </p>
+            <Link
+              to="/login"
+              className="mt-8 inline-block rounded-xl bg-white px-7 py-3 font-semibold text-black"
+            >
+              Go to Login
+            </Link>
+          </>
+        )}
 
-        <div className="mt-10 space-y-4">
+        {status === "error" && (
+          <>
+            <h1 className="text-4xl font-bold">
+              Verification failed.
+            </h1>
 
-          <button
-            className="w-full rounded-xl border border-gray-800 py-3 text-gray-300 hover:bg-gray-900"
-          >
-            Resend Verification Email
-          </button>
+            <p className="mt-4 text-gray-400">
+              {message}
+            </p>
 
-          <Link
-            to="/login"
-            className="block text-sm text-gray-400 hover:text-white"
-          >
-            Back to Login
-          </Link>
-
-        </div>
+            <Link
+              to="/register"
+              className="mt-8 inline-block text-white hover:underline"
+            >
+              Back to Register
+            </Link>
+          </>
+        )}
 
       </div>
-
-    </div>
+    </main>
   )
 }
 

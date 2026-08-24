@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta,timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -19,8 +19,15 @@ from app.schemas.auth import (
     RegisterRequest,
     RegisterResponse,
     VerifyEmailResponse,
+    ResendVerificationRequest,
+    ResendVerificationResponse,
 )
 from app.core.dependencies import get_current_user
+from app.services.email_verification import (
+    create_verification_token,
+    send_verification_email,
+    hash_token,
+)
 
 router = APIRouter(
     prefix="/auth",
@@ -67,6 +74,16 @@ def register(
     db.add(verification)
     db.commit()
     db.refresh(new_user)
+    
+    token = create_verification_token(
+      db=db,
+      user=new_user,
+    )
+ 
+    send_verification_email(
+      user=new_user,
+      token=token,
+    )
 
     return {
         "message": "Account created successfully. Please verify your email.",
@@ -82,44 +99,110 @@ def verify_email(
     token: str,
     db: Session = Depends(get_db),
 ):
-    token_hash = hash_verification_token(token)
+    print("\n========== EMAIL VERIFICATION ==========")
+    print("Received token:", repr(token))
+
+    token_hash = hash_token(token)
+
+    print("Calculated hash:", token_hash)
 
     verification = (
         db.query(EmailVerification)
-        .filter(EmailVerification.token_hash == token_hash)
+        .filter(
+            EmailVerification.token_hash == token_hash
+        )
+        .order_by(
+            EmailVerification.id.desc()
+        )
         .first()
     )
 
     if not verification:
+        print("RESULT: TOKEN NOT FOUND")
+
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid verification token",
+            status_code=400,
+            detail="Invalid verification token.",
         )
 
-    if verification.verified_at is not None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email has already been verified",
-        )
+    print(
+        "Verification ID:",
+        verification.id,
+    )
 
-    if verification.expires_at < datetime.utcnow():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Verification token has expired",
-        )
+    print(
+        "User ID:",
+        verification.user_id,
+    )
 
-    user = db.query(User).filter(User.id == verification.user_id).first()
+    print(
+        "Expires:",
+        verification.expires_at,
+    )
+
+    print(
+        "Verified At:",
+        verification.verified_at,
+    )
+
+    user = (
+        db.query(User)
+        .filter(
+            User.id == verification.user_id
+        )
+        .first()
+    )
 
     if not user:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User account not found",
+            status_code=404,
+            detail="User not found.",
+        )
+
+    print(
+        "User email:",
+        user.email,
+    )
+
+    print(
+        "User verified:",
+        user.is_email_verified,
+    )
+
+    if verification.verified_at:
+        if user.is_email_verified:
+            print(
+                "RESULT: ALREADY VERIFIED"
+            )
+
+            return {
+                "message": "Email is already verified.",
+                "email": user.email,
+            }
+
+        raise HTTPException(
+            status_code=400,
+            detail="Verification token has already been used.",
+        )
+
+    now = datetime.utcnow()
+
+    if verification.expires_at < now:
+        print("RESULT: TOKEN EXPIRED")
+
+        raise HTTPException(
+            status_code=400,
+            detail="Verification token has expired.",
         )
 
     user.is_email_verified = True
-    verification.verified_at = datetime.utcnow()
+    verification.verified_at = now
 
     db.commit()
+
+    print(
+        "RESULT: VERIFICATION SUCCESS"
+    )
 
     return {
         "message": "Email verified successfully.",
@@ -162,6 +245,53 @@ def login(
         "message": "Login successful",
     }
 
+@router.post(
+    "/resend-verification",
+    response_model=ResendVerificationResponse,
+)
+def resend_verification(
+    user_data: ResendVerificationRequest,
+    db: Session = Depends(get_db),
+):
+    user = (
+        db.query(User)
+        .filter(
+            User.email == user_data.email
+        )
+        .first()
+    )
+
+    # Don't reveal whether an email exists.
+    if not user:
+        return {
+            "message": (
+                "If an account exists for this email, "
+                "a verification email has been sent."
+            )
+        }
+
+    if user.is_email_verified:
+        return {
+            "message": "Email is already verified."
+        }
+
+    token = create_verification_token(
+        db=db,
+        user=user,
+    )
+
+    send_verification_email(
+        user=user,
+        token=token,
+    )
+
+    return {
+        "message": (
+            "If an account exists for this email, "
+            "a verification email has been sent."
+        )
+    }
+
 @router.get(
     "/me",
     response_model=CurrentUserResponse,
@@ -170,3 +300,4 @@ def get_me(
     current_user: User = Depends(get_current_user),
 ):
     return current_user
+

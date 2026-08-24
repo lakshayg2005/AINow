@@ -13,6 +13,9 @@ from app.schemas.newsletter import (
     NewsletterSectionResponse,
     NewsletterSummaryResponse,
 )
+from app.services.email.sender import (
+    send_newsletter_to_subscribers,
+)
 
 
 router = APIRouter(
@@ -188,10 +191,30 @@ def publish_newsletter(
     db.commit()
     db.refresh(newsletter)
 
+    delivery_results = (
+    send_newsletter_to_subscribers(
+        db=db,
+        newsletter=newsletter,
+    )
+    )
+
     return {
         "message": "Newsletter published successfully",
         "newsletter_id": newsletter.id,
         "published_at": newsletter.published_at,
+        "delivery_summary": {
+            "total": len(delivery_results),
+            "sent": sum(
+                1
+                for item in delivery_results
+                if item["status"] == "sent"
+            ),
+            "failed": sum(
+                1
+                for item in delivery_results
+                if item["status"] == "failed"
+            ),
+        },
     }
 
 

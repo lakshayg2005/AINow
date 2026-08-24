@@ -32,3 +32,13 @@ class CurrentUserResponse(BaseModel):
     name: str
     email: EmailStr
     is_email_verified: bool
+
+class VerifyEmailResponse(BaseModel):
+    message: str
+    email: EmailStr
+
+class ResendVerificationResponse(BaseModel):
+    message: str
+
+class ResendVerificationRequest(BaseModel):
+    email: EmailStr
