@@ -1,5 +1,3 @@
-import hashlib
-import secrets
 from datetime import datetime, timedelta, timezone
 
 from jose import JWTError, jwt
@@ -22,12 +20,12 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
 
-def generate_verification_token() -> str:
-    return secrets.token_urlsafe(32)
+# def generate_verification_token() -> str:
+#     return secrets.token_urlsafe(32)
 
 
-def hash_verification_token(token: str) -> str:
-    return hashlib.sha256(token.encode()).hexdigest()
+# def hash_verification_token(token: str) -> str:
+#     return hashlib.sha256(token.encode()).hexdigest()
 
 
 def create_access_token(user_id: int) -> str:

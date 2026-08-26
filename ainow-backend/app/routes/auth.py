@@ -1,13 +1,11 @@
-from datetime import datetime, timedelta,timezone
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.security import (
     create_access_token,
-    generate_verification_token,
     hash_password,
-    hash_verification_token,
     verify_password,
 )
 from app.db.database import get_db
@@ -27,6 +25,8 @@ from app.services.email_verification import (
     create_verification_token,
     send_verification_email,
     hash_token,
+    check_resend_cooldown,
+    mark_resend_sent,    
 )
 
 router = APIRouter(
@@ -44,7 +44,11 @@ def register(
     user_data: RegisterRequest,
     db: Session = Depends(get_db),
 ):
-    existing_user = db.query(User).filter(User.email == user_data.email).first()
+    existing_user = (
+        db.query(User)
+        .filter(User.email == user_data.email)
+        .first()
+    )
 
     if existing_user:
         raise HTTPException(
@@ -55,41 +59,40 @@ def register(
     new_user = User(
         name=user_data.name,
         email=user_data.email,
-        password_hash=hash_password(user_data.password),
+        password_hash=hash_password(
+            user_data.password
+        ),
     )
 
     db.add(new_user)
-    db.flush()
-
-    verification_token = generate_verification_token()
-    # print("VERIFICATION TOKEN:", verification_token)
-    token_hash = hash_verification_token(verification_token)
-
-    verification = EmailVerification(
-        user_id=new_user.id,
-        token_hash=token_hash,
-        expires_at=datetime.utcnow() + timedelta(hours=24),
-    )
-
-    db.add(verification)
     db.commit()
     db.refresh(new_user)
-    
+
+    # -----------------------------------------
+    # Create ONE verification token
+    # -----------------------------------------
+
     token = create_verification_token(
-      db=db,
-      user=new_user,
+        db=db,
+        user=new_user,
     )
- 
+
+    # -----------------------------------------
+    # Send verification email
+    # -----------------------------------------
+
     send_verification_email(
-      user=new_user,
-      token=token,
+        user=new_user,
+        token=token,
     )
 
     return {
-        "message": "Account created successfully. Please verify your email.",
+        "message": (
+            "Account created successfully. "
+            "Please verify your email."
+        ),
         "email": new_user.email,
     }
-
 
 @router.get(
     "/verify-email",
@@ -261,7 +264,7 @@ def resend_verification(
         .first()
     )
 
-    # Don't reveal whether an email exists.
+    # Don't reveal whether the account exists.
     if not user:
         return {
             "message": (
@@ -275,29 +278,59 @@ def resend_verification(
             "message": "Email is already verified."
         }
 
+    # -----------------------------------------
+    # Cooldown
+    # -----------------------------------------
+
+    remaining = check_resend_cooldown(
+        user.email
+    )
+
+    if remaining > 0:
+        return {
+            "message": (
+                "Please wait "
+                f"{remaining} seconds before "
+                "requesting another verification email."
+            )
+        }
+
+    # -----------------------------------------
+    # Generate new token
+    # -----------------------------------------
+
     token = create_verification_token(
         db=db,
         user=user,
     )
+
+    # -----------------------------------------
+    # Send email
+    # -----------------------------------------
 
     send_verification_email(
         user=user,
         token=token,
     )
 
+    mark_resend_sent(
+        user.email
+    )
+
     return {
         "message": (
-            "If an account exists for this email, "
-            "a verification email has been sent."
+            "Email resent! Don't forget to "
+            "check your Spam folder and verify "
+            "that the correct email was entered."
         )
     }
 
-@router.get(
-    "/me",
-    response_model=CurrentUserResponse,
-)
-def get_me(
-    current_user: User = Depends(get_current_user),
-):
-    return current_user
+# @router.get(
+#     "/me",
+#     response_model=CurrentUserResponse,
+# )
+# def get_me(
+#     current_user: User = Depends(get_current_user),
+# ):
+#     return current_user
 

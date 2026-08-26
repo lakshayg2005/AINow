@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import time
 import hashlib
 import secrets
 
@@ -9,6 +10,9 @@ from app.services.email.smtp_provider import SMTPEmailProvider
 
 
 VERIFICATION_EXPIRE_MINUTES = 30
+RESEND_COOLDOWN_SECONDS = 60
+
+_resend_cooldowns: dict[str, float] = {}
 
 
 def hash_token(token: str) -> str:
@@ -135,3 +139,38 @@ def send_verification_email(
             f"email-verification-{user.id}-{token}"
         ),
     )
+
+# Below 2 functions ensures the /resend-verification link is not clicked many times (one after another continously by using Cool down time).
+# Importanat :Altough we are cureently implementing In-memory Cool-down ,later when we deploy,all server instances will ahve thier own dictionary so that time coll-down time will be implemented on Redis.
+
+def check_resend_cooldown(
+    email: str,
+) -> int:
+    key = email.strip().lower()
+
+    now = time.time()
+
+    last_sent = _resend_cooldowns.get(key)
+
+    if last_sent is None:
+        return 0
+
+    elapsed = now - last_sent
+
+    remaining = (
+        RESEND_COOLDOWN_SECONDS
+        - int(elapsed)
+    )
+
+    return max(
+        remaining,
+        0,
+    )
+
+
+def mark_resend_sent(
+    email: str,
+):
+    _resend_cooldowns[
+        email.strip().lower()
+    ] = time.time()
