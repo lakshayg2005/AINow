@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     smtp_password: str
     email_from: str
 
+    GITHUB_TOKEN: str | None = None
+
     class Config:
         env_file = ".env"
 

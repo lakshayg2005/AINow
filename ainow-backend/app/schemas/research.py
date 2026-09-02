@@ -13,10 +13,25 @@ ResearchCategory = Literal[
     "open-source",
     "technical",
 ]
+ResearchAccessMode = Literal[
+    "api",
+    "mcp",
+    "web",
+]
+NewsletterSectionType = Literal[
+    "quick_news",
+    "research_spotlight",
+    "paper_of_week",
+    "deep_dive",
+    "ai_trends",
+    "ai_concept",
+    "ai_resources",
+]
 
 
 class ResearchSource(BaseModel):
     name: str
+
     category: ResearchCategory
 
     trust_tier: int = Field(
@@ -33,6 +48,8 @@ class ResearchSource(BaseModel):
     topics: list[str] = Field(
         default_factory=list
     )
+
+    access_mode: ResearchAccessMode = "api"
 
     enabled: bool = True
 
@@ -93,6 +110,27 @@ class RankedCandidate(BaseModel):
         default_factory=list
     )
 
+class ResearchSectionPlan(BaseModel):
+    section: NewsletterSectionType
+
+    source_categories: list[ResearchCategory] = Field(
+        default_factory=list
+    )
+
+    lookback_days: int = Field(
+        default=7,
+        ge=1,
+    )
+
+    queries: list[str] = Field(
+        default_factory=list
+    )
+
+    max_results_per_source: int = Field(
+        default=10,
+        ge=1,
+        le=50,
+    )
 
 class ResearchPlan(BaseModel):
     topic: str
@@ -101,7 +139,14 @@ class ResearchPlan(BaseModel):
         default_factory=list
     )
 
-    lookback_days: int = 7
+    lookback_days: int = Field(
+        default=7,
+        ge=1,
+    )
+
+    sections: list[ResearchSectionPlan] = Field(
+        default_factory=list
+    )
 
 class EditorialSelection(BaseModel):
     selected_candidate_indices: list[int] = Field(
@@ -121,3 +166,4 @@ class EditorialSelection(BaseModel):
     )
 
     reasoning: str = ""
+

@@ -1,50 +1,104 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
 from typing import Any
 
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
+import httpx2
+
+from mcp import ClientSession
+from mcp.client.streamable_http import (
+    streamable_http_client,
+)
 
 
-class ExternalMCPClient:
+@dataclass
+class MCPServerConfig:
+    name: str
+    url: str
+    headers: dict[str, str] | None = None
 
-    async def fetch_url(self, url: str) -> Any:
-        server_params = StdioServerParameters(
-            command="npx",
-            args=[
-                "-y",
-                "@modelcontextprotocol/server-fetch",
-            ],
+
+class MCPClient:
+    """
+    Generic client for remote MCP servers using Streamable HTTP.
+
+    Authentication headers, proxies, timeouts, etc. are supplied
+    through httpx2.AsyncClient.
+    """
+
+    def __init__(
+        self,
+        config: MCPServerConfig,
+    ):
+        self.config = config
+
+    def _http_client(
+        self,
+    ) -> httpx2.AsyncClient:
+        return httpx2.AsyncClient(
+            headers=self.config.headers or {},
+            timeout=httpx2.Timeout(
+                30.0,
+                read=300.0,
+            ),
+            follow_redirects=True,
         )
 
-        async with stdio_client(server_params) as (
-            read,
-            write,
-        ):
-            async with ClientSession(
-                read,
-                write,
-            ) as session:
+    async def list_tools(self) -> list[Any]:
+        """
+        Connect to the MCP server and list its tools.
+        """
 
-                await session.initialize()
+        async with self._http_client() as http_client:
 
-                tools = await session.list_tools()
+            async with streamable_http_client(
+                self.config.url,
+                http_client=http_client,
+            ) as (
+                read_stream,
+                write_stream,
+            ):
 
-                fetch_tool = None
+                async with ClientSession(
+                    read_stream,
+                    write_stream,
+                ) as session:
 
-                for tool in tools.tools:
-                    if tool.name == "fetch":
-                        fetch_tool = tool
-                        break
+                    await session.initialize()
 
-                if fetch_tool is None:
-                    raise RuntimeError(
-                        "Fetch MCP server does not expose a 'fetch' tool"
+                    result = await session.list_tools()
+
+                    return list(
+                        result.tools
                     )
 
-                result = await session.call_tool(
-                    "fetch",
-                    {
-                        "url": url,
-                    },
-                )
+    async def call_tool(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any] | None = None,
+    ) -> Any:
+        """
+        Connect to the MCP server and invoke one tool.
+        """
 
-                return result
+        async with self._http_client() as http_client:
+
+            async with streamable_http_client(
+                self.config.url,
+                http_client=http_client,
+            ) as (
+                read_stream,
+                write_stream,
+            ):
+
+                async with ClientSession(
+                    read_stream,
+                    write_stream,
+                ) as session:
+
+                    await session.initialize()
+
+                    return await session.call_tool(
+                        tool_name,
+                        arguments=arguments or {},
+                    )

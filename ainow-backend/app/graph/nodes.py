@@ -66,12 +66,11 @@ async def collect_node(
     orchestrator = ResearchOrchestrator()
 
     candidates = await orchestrator.research(
-        queries=plan.queries,
-        lookback_days=plan.lookback_days,
+        plan=plan,
     )
 
     return {
-        "candidates": candidates
+        "candidates": candidates,
     }
 
 
