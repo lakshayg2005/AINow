@@ -1,252 +1,265 @@
-from datetime import datetime, timezone
+from __future__ import annotations
 
-from app.research.relevance import relevance_score
+from datetime import datetime, timezone
+from typing import Iterable
+
 from app.schemas.research import (
     RankedCandidate,
     ResearchCandidate,
 )
 
 
-def freshness_score(
+# ============================================================
+# Scoring weights
+# ============================================================
+
+TRUST_WEIGHT = 20.0
+RECENCY_WEIGHT = 30.0
+CONTENT_WEIGHT = 25.0
+SOURCE_DIVERSITY_WEIGHT = 10.0
+EVIDENCE_WEIGHT = 15.0
+
+
+# ============================================================
+# Score helpers
+# ============================================================
+
+def _recency_score(
     published_at: datetime | None,
-    lookback_days: int,
 ) -> float:
-
     if published_at is None:
-        return 0.4
+        return 0.0
 
-    if published_at.tzinfo is None:
-        published_at = published_at.replace(
+    now = datetime.now(timezone.utc)
+
+    timestamp = published_at
+
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(
             tzinfo=timezone.utc
         )
 
-    age_days = (
-        datetime.now(timezone.utc)
-        - published_at
-    ).total_seconds() / 86400
+    age_hours = max(
+        0.0,
+        (
+            now - timestamp
+        ).total_seconds() / 3600.0,
+    )
 
-    score = (
-        1.0
-        - age_days / max(
-            lookback_days,
-            1,
+    return 100.0 * (
+        2.718281828459045
+        ** (-age_hours / 24.0)
+    )
+
+
+def _trust_score(
+    candidate: ResearchCandidate,
+) -> float:
+    tier = candidate.trust_tier
+
+    if tier <= 1:
+        return 100.0
+
+    if tier == 2:
+        return 75.0
+
+    return 50.0
+
+
+def _content_score(
+    candidate: ResearchCandidate,
+) -> float:
+    text = candidate.raw_content or ""
+    length = len(text)
+
+    if length < 300:
+        return 10.0
+
+    if length < 1000:
+        return 40.0
+
+    if length < 3000:
+        return 70.0
+
+    if length < 8000:
+        return 90.0
+
+    return 100.0
+
+
+def _source_diversity_score(
+    candidate: ResearchCandidate,
+) -> float:
+    """
+    Cross-source confirmation score.
+
+    1 source  -> 0
+    2 sources -> 50
+    3+ sources -> 100
+    """
+
+    count = max(
+        1,
+        candidate.cross_source_count,
+    )
+
+    if count == 1:
+        return 0.0
+
+    if count == 2:
+        return 50.0
+
+    return 100.0
+
+
+def _evidence_score(
+    candidate: ResearchCandidate,
+) -> float:
+    text = (
+        candidate.raw_content or ""
+    ).lower()
+
+    score = 0.0
+
+    indicators = (
+        ("benchmark", 15.0),
+        ("evaluation", 15.0),
+        ("research", 10.0),
+        ("paper", 10.0),
+        ("dataset", 10.0),
+        ("model", 8.0),
+        ("release", 8.0),
+        ("results", 8.0),
+        ("performance", 8.0),
+        ("github", 5.0),
+        ("source", 3.0),
+    )
+
+    for keyword, weight in indicators:
+        if keyword in text:
+            score += weight
+
+    return min(
+        100.0,
+        score,
+    )
+
+
+def _base_score(
+    candidate: ResearchCandidate,
+) -> float:
+    total_weight = (
+        TRUST_WEIGHT
+        + RECENCY_WEIGHT
+        + CONTENT_WEIGHT
+        + SOURCE_DIVERSITY_WEIGHT
+        + EVIDENCE_WEIGHT
+    )
+
+    weighted_score = (
+        (
+            _trust_score(candidate)
+            * TRUST_WEIGHT
+        )
+        + (
+            _recency_score(
+                candidate.published_at
+            )
+            * RECENCY_WEIGHT
+        )
+        + (
+            _content_score(candidate)
+            * CONTENT_WEIGHT
+        )
+        + (
+            _source_diversity_score(candidate)
+            * SOURCE_DIVERSITY_WEIGHT
+        )
+        + (
+            _evidence_score(candidate)
+            * EVIDENCE_WEIGHT
         )
     )
 
-    return max(
-        0.0,
-        min(1.0, score),
-    )
+    return weighted_score / total_weight
 
 
-def trust_score(
-    trust_tier: int,
-) -> float:
-
-    return {
-        1: 1.0,
-        2: 0.7,
-        3: 0.4,
-    }.get(
-        trust_tier,
-        0.4,
-    )
-
-
-def content_score(
-    candidate: ResearchCandidate,
-) -> float:
-
-    text_length = len(
-        candidate.raw_content.strip()
-    )
-
-    if text_length >= 1000:
-        return 1.0
-
-    if text_length >= 500:
-        return 0.8
-
-    if text_length >= 200:
-        return 0.6
-
-    if text_length >= 80:
-        return 0.4
-
-    return 0.2
-
-
-def impact_score(
-    candidate: ResearchCandidate,
-) -> float:
-
-    citations = candidate.citation_count
-
-    if citations >= 100:
-        return 1.0
-
-    if citations >= 50:
-        return 0.9
-
-    if citations >= 20:
-        return 0.75
-
-    if citations >= 10:
-        return 0.6
-
-    if citations >= 5:
-        return 0.45
-
-    if citations >= 1:
-        return 0.3
-
-    return 0.2
-
-
-def novelty_score(
-    candidate: ResearchCandidate,
-) -> float:
-
-    # Temporary neutral score.
-    #
-    # We will replace this with actual
-    # semantic novelty using the
-    # research_papers pgvector corpus.
-
-    return 0.5
-
-
-def cross_source_score(
-    candidate: ResearchCandidate,
-) -> float:
-
-    count = candidate.cross_source_count
-
-    if count >= 3:
-        return 1.0
-
-    if count == 2:
-        return 0.75
-
-    return 0.4
-
+# ============================================================
+# Diversity-aware ranking
+# ============================================================
 
 def rank_candidates(
-    candidates: list[ResearchCandidate],
-    queries: list[str],
-    lookback_days: int = 7,
+    candidates: Iterable[ResearchCandidate],
 ) -> list[RankedCandidate]:
+    """
+    Rank candidates and return RankedCandidate objects.
+
+    Ranking position is represented by list order.
+    RankedCandidate does not require a separate rank field.
+    """
+
+    candidate_list = list(candidates)
+
+    if not candidate_list:
+        return []
+
+    scored = [
+        (
+            _base_score(candidate),
+            index,
+            candidate,
+        )
+        for index, candidate
+        in enumerate(candidate_list)
+    ]
+
+    scored.sort(
+        key=lambda item: (
+            -item[0],
+            item[1],
+        )
+    )
 
     ranked: list[RankedCandidate] = []
 
-    for candidate in candidates:
+    source_counts: dict[str, int] = {}
 
-        # -----------------------------------------
-        # Relevance
-        # -----------------------------------------
+    deferred: list[
+        tuple[
+            float,
+            int,
+            ResearchCandidate,
+        ]
+    ] = []
 
-        relevance = max(
-            relevance_score(
-                candidate,
-                query,
+    # --------------------------------------------------------
+    # First page: diversity-aware selection
+    # --------------------------------------------------------
+
+    for score, index, candidate in scored:
+        source = candidate.source_name
+
+        count = source_counts.get(
+            source,
+            0,
+        )
+
+        if (
+            count >= 4
+            and len(ranked) < 12
+        ):
+            deferred.append(
+                (
+                    score,
+                    index,
+                    candidate,
+                )
             )
-            for query in queries
+            continue
+
+        source_counts[source] = (
+            count + 1
         )
-
-        # -----------------------------------------
-        # Freshness
-        # -----------------------------------------
-
-        freshness = freshness_score(
-            candidate.published_at,
-            lookback_days,
-        )
-
-        # -----------------------------------------
-        # Trust
-        # -----------------------------------------
-
-        trust = trust_score(
-            candidate.trust_tier
-        )
-
-        # -----------------------------------------
-        # Content quality
-        # -----------------------------------------
-
-        content = content_score(
-            candidate
-        )
-
-        # -----------------------------------------
-        # Research impact
-        # -----------------------------------------
-
-        impact = impact_score(
-            candidate
-        )
-
-        # -----------------------------------------
-        # Cross-source confirmation
-        # -----------------------------------------
-
-        confirmation = cross_source_score(
-            candidate
-        )
-
-        # -----------------------------------------
-        # Novelty
-        # -----------------------------------------
-
-        novelty = novelty_score(
-            candidate
-        )
-
-        # -----------------------------------------
-        # Final score
-        # -----------------------------------------
-
-        score = (
-            relevance * 0.25
-            + freshness * 0.20
-            + trust * 0.20
-            + impact * 0.15
-            + confirmation * 0.10
-            + content * 0.05
-            + novelty * 0.05
-        )
-
-        reasons: list[str] = []
-
-        if relevance >= 0.7:
-            reasons.append(
-                "high-query-relevance"
-            )
-
-        if freshness >= 0.7:
-            reasons.append(
-                "recent"
-            )
-
-        if trust >= 0.9:
-            reasons.append(
-                "high-trust-source"
-            )
-
-        if impact >= 0.6:
-            reasons.append(
-                "research-impact"
-            )
-
-        if confirmation >= 0.75:
-            reasons.append(
-                "cross-source-confirmed"
-            )
-
-        if content >= 0.8:
-            reasons.append(
-                "content-rich"
-            )
 
         ranked.append(
             RankedCandidate(
@@ -255,13 +268,24 @@ def rank_candidates(
                     score,
                     4,
                 ),
-                reasons=reasons,
+                reasons=[],
             )
         )
 
-    ranked.sort(
-        key=lambda item: item.score,
-        reverse=True,
-    )
+    # --------------------------------------------------------
+    # Append deferred candidates
+    # --------------------------------------------------------
+
+    for score, _, candidate in deferred:
+        ranked.append(
+            RankedCandidate(
+                candidate=candidate,
+                score=round(
+                    score,
+                    4,
+                ),
+                reasons=[],
+            )
+        )
 
     return ranked

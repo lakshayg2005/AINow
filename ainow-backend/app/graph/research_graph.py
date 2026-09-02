@@ -1,4 +1,8 @@
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import (
+    END,
+    START,
+    StateGraph,
+)
 
 from app.graph.nodes import (
     collect_node,
@@ -9,7 +13,10 @@ from app.graph.nodes import (
     content_generation_node,
     persist_newsletter_node,
 )
-from app.graph.state import ResearchState
+
+from app.graph.state import (
+    ResearchState,
+)
 
 
 builder = StateGraph(
@@ -36,18 +43,22 @@ builder.add_node(
     "ranking",
     ranking_node,
 )
+
 builder.add_node(
     "editorial_selection",
     editorial_selection_node,
 )
+
 builder.add_node(
     "content_generation",
     content_generation_node,
 )
+
 builder.add_node(
     "persist_newsletter",
     persist_newsletter_node,
 )
+
 
 builder.add_edge(
     START,

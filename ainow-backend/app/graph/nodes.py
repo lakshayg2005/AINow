@@ -1,7 +1,18 @@
+from __future__ import annotations
+
 from app.db.database import SessionLocal
-from app.research.orchestrator import ResearchOrchestrator
-from app.research.planner import build_research_plan
-from app.research.ranking import rank_candidates
+from app.research.orchestrator import (
+    ResearchOrchestrator,
+)
+from app.research.planner import (
+    build_research_plan,
+)
+from app.research.ranking import (
+    rank_candidates,
+)
+from app.research.article_enrichment import (
+    enrich_candidates,
+)
 
 from langchain_core.messages import (
     HumanMessage,
@@ -12,7 +23,9 @@ from langchain_core.output_parsers import (
     PydanticOutputParser,
 )
 
-from app.core.llm import get_editor_llm
+from app.core.llm import (
+    invoke_editor_llm,
+)
 
 from app.schemas.research import (
     EditorialSelection,
@@ -21,11 +34,9 @@ from app.schemas.research import (
 from app.schemas.newsletter import (
     NewsletterContent,
 )
+
 from app.services.newsletter_pipeline import (
     save_generated_newsletter,
-)
-from app.core.llm import (
-    invoke_editor_llm,
 )
 
 
@@ -69,6 +80,11 @@ async def collect_node(
         plan=plan,
     )
 
+    print(
+        f"[Research] Collected: "
+        f"{len(candidates)} candidates"
+    )
+
     return {
         "candidates": candidates,
     }
@@ -84,7 +100,6 @@ def deduplicate_candidates(
     unique = {}
 
     for candidate in candidates:
-
         key = (
             candidate.url
             .strip()
@@ -116,6 +131,12 @@ def freshness_node(
         candidates
     )
 
+    if not candidates:
+        return {
+            "freshness_results": [],
+            "fresh_candidates": [],
+        }
+
     db = SessionLocal()
 
     try:
@@ -143,13 +164,20 @@ def freshness_node(
                     db,
                 )
 
-            results.append(result)
+            results.append(
+                result
+            )
 
         fresh = [
             result.candidate
             for result in results
             if result.is_fresh
         ]
+
+        print(
+            f"[Research] Fresh candidates: "
+            f"{len(fresh)}"
+        )
 
         return {
             "freshness_results": results,
@@ -161,10 +189,10 @@ def freshness_node(
 
 
 # =========================================================
-# DETERMINISTIC RANKING
+# DETERMINISTIC RANKING + ENRICHMENT
 # =========================================================
 
-def ranking_node(
+async def ranking_node(
     state,
 ):
     candidates = state.get(
@@ -176,16 +204,90 @@ def ranking_node(
         candidates
     )
 
-    plan = state["plan"]
+    if not candidates:
+        return {
+            "ranked_candidates": []
+        }
+
+    # -----------------------------------------------------
+    # Preliminary ranking
+    # -----------------------------------------------------
+
+    preliminary = rank_candidates(
+        candidates
+    )
+
+    # -----------------------------------------------------
+    # Select top candidates for article enrichment
+    # -----------------------------------------------------
+
+    enrichment_limit = min(
+        16,
+        len(preliminary),
+    )
+
+    enrichment_input = [
+        item.candidate
+        for item in preliminary[
+            :enrichment_limit
+        ]
+    ]
+
+    remaining = [
+        item.candidate
+        for item in preliminary[
+            enrichment_limit:
+        ]
+    ]
+
+    enriched = await enrich_candidates(
+        enrichment_input,
+        max_enrichments=enrichment_limit,
+    )
+
+    # The enrichment function preserves the selected
+    # candidates plus anything it could not enrich.
+    enriched_map = {
+        candidate.url.rstrip("/").lower(): candidate
+        for candidate in enriched
+    }
+
+    enriched_all = []
+
+    for ranked in preliminary:
+
+        key = (
+            ranked.candidate.url
+            .rstrip("/")
+            .lower()
+        )
+
+        enriched_candidate = (
+            enriched_map.get(
+                key,
+                ranked.candidate,
+            )
+        )
+
+        enriched_all.append(
+            enriched_candidate
+        )
+
+    # -----------------------------------------------------
+    # Final ranking after article enrichment
+    # -----------------------------------------------------
 
     ranked = rank_candidates(
-        candidates=candidates,
-        queries=plan.queries,
-        lookback_days=plan.lookback_days,
+        enriched_all
+    )
+
+    print(
+        f"[Research] Ranked: "
+        f"{len(ranked)} candidates"
     )
 
     return {
-        "ranked_candidates": ranked
+        "ranked_candidates": ranked,
     }
 
 
@@ -201,8 +303,6 @@ async def editorial_selection_node(
         [],
     )
 
-    # Only expose the strongest candidates
-    # to the LLM.
     top_candidates = ranked_candidates[:20]
 
     if not top_candidates:
@@ -256,8 +356,10 @@ Content:
 """.strip()
         )
 
-    candidates_text = "\n\n---\n\n".join(
-        candidate_blocks
+    candidates_text = (
+        "\n\n---\n\n".join(
+            candidate_blocks
+        )
     )
 
     system_prompt = """
@@ -327,7 +429,6 @@ Choose:
 {parser.get_format_instructions()}
 """
 
-
     response = await invoke_editor_llm(
         [
             SystemMessage(
@@ -348,13 +449,11 @@ Choose:
     )
 
     try:
-
         selection = parser.parse(
             response.content
         )
 
     except Exception as error:
-
         raise RuntimeError(
             "Failed to parse editorial "
             f"selection: {error}\n"
@@ -379,19 +478,22 @@ Choose:
 
     selection.selected_candidate_indices = [
         index
-        for index in selection.selected_candidate_indices
+        for index
+        in selection.selected_candidate_indices
         if index in valid_range
     ]
 
     selection.research_spotlight_indices = [
         index
-        for index in selection.research_spotlight_indices
+        for index
+        in selection.research_spotlight_indices
         if index in valid_range
     ]
 
     selection.trend_indices = [
         index
-        for index in selection.trend_indices
+        for index
+        in selection.trend_indices
         if index in valid_range
     ]
 
@@ -448,7 +550,6 @@ async def content_generation_node(
     for index in selected_indices:
 
         if 1 <= index <= len(ranked):
-
             selected_candidates.append(
                 {
                     "index": index,
@@ -549,21 +650,15 @@ Content:
 """.strip()
         )
 
-    candidates_text = "\n\n---\n\n".join(
-        candidate_blocks
+    candidates_text = (
+        "\n\n---\n\n".join(
+            candidate_blocks
+        )
     )
-
-    # ==================================================
-    # OUTPUT PARSER
-    # ==================================================
 
     parser = PydanticOutputParser(
         pydantic_object=NewsletterContent
     )
-
-    # ==================================================
-    # SYSTEM PROMPT
-    # ==================================================
 
     system_prompt = """
 You are the senior content editor for AINow,
@@ -573,6 +668,7 @@ Create a concise, technically accurate newsletter
 from the supplied research candidates.
 
 IMPORTANT:
+
 The output MUST remain compact enough to fit in
 a single response.
 
@@ -651,10 +747,6 @@ and Research Spotlight item unless it is the Paper
 of the Week.
 """
 
-    # ==================================================
-    # USER PROMPT
-    # ==================================================
-
     user_prompt = f"""
 /no_think
 
@@ -684,16 +776,12 @@ Generate the complete AINow V1 newsletter.
 Be concise.
 
 IMPORTANT:
+
 Do not add extra items beyond the exact limits
 specified by the system instructions.
 
 {parser.get_format_instructions()}
 """
-
-    # ==================================================
-    # CALL LLM
-    # ==================================================
-
 
     response = await invoke_editor_llm(
         [
@@ -714,18 +802,12 @@ specified by the system instructions.
         repr(response.content)
     )
 
-    # ==================================================
-    # PARSE
-    # ==================================================
-
     try:
-
         content = parser.parse(
             response.content
         )
 
     except Exception as error:
-
         raise RuntimeError(
             "Failed to parse newsletter "
             f"content: {error}\n"
@@ -737,6 +819,11 @@ specified by the system instructions.
         "newsletter_content":
             content
     }
+
+
+# =========================================================
+# PERSIST NEWSLETTER
+# =========================================================
 
 def persist_newsletter_node(
     state,
@@ -753,7 +840,6 @@ def persist_newsletter_node(
     db = SessionLocal()
 
     try:
-
         issue = save_generated_newsletter(
             db=db,
             content=content,

@@ -4,7 +4,7 @@ from app.mcp.client import MCPClient
 from app.mcp.registry import get_mcp_server
 
 
-async def test_server(server_name: str):
+async def run_server(server_name: str):
     print("=" * 60)
     print(f"MCP SERVER: {server_name}")
     print("=" * 60)
@@ -34,7 +34,8 @@ async def test_server(server_name: str):
 
 
 async def main():
-    await test_server("huggingface")
+    await run_server("github")
+    await run_server("huggingface")
 
 
 if __name__ == "__main__":

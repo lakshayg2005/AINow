@@ -1,249 +1,541 @@
 from __future__ import annotations
 
+from collections import OrderedDict
+from typing import Any
+
 from app.research.academic_sources import (
     search_arxiv,
     search_crossref,
     search_semantic_scholar,
 )
-from app.research.deduplication import merge_candidates
-from app.research.mcp_sources import search_mcp_source
-from app.research.relevance import is_relevant
+from app.research.mcp_sources import (
+    search_mcp_source,
+)
+from app.research.relevance import (
+    is_relevant,
+)
 from app.research.source_router import (
     get_effective_lookback,
     route_sources,
 )
-from app.schemas.research import ResearchCandidate
+from app.research.web_sources import (
+    search_web_source,
+)
+from app.schemas.research import (
+    ResearchCandidate,
+    ResearchPlan,
+)
 
+
+# ============================================================
+# Configuration
+# ============================================================
+
+DEFAULT_SOURCE_RESULTS = 10
+
+# Prevent one plan from generating an excessive number
+# of network calls per section.
+MAX_QUERIES_PER_SECTION = 1
+
+
+# ============================================================
+# Helpers
+# ============================================================
+
+def _candidate_key(
+    candidate: ResearchCandidate,
+) -> str:
+    return (
+        candidate.url
+        .strip()
+        .rstrip("/")
+        .lower()
+    )
+
+
+def _merge_candidates(
+    candidates: list[ResearchCandidate],
+) -> list[ResearchCandidate]:
+    """
+    Merge candidates pointing to the same URL.
+
+    Prefer the candidate with richer content.
+    """
+
+    merged: OrderedDict[
+        str,
+        ResearchCandidate,
+    ] = OrderedDict()
+
+    for candidate in candidates:
+        key = _candidate_key(candidate)
+
+        existing = merged.get(key)
+
+        if existing is None:
+            merged[key] = candidate
+            continue
+
+        existing_length = len(
+            existing.raw_content or ""
+        )
+
+        candidate_length = len(
+            candidate.raw_content or ""
+        )
+
+        if candidate_length > existing_length:
+            merged[key] = candidate
+
+    return list(
+        merged.values()
+    )
+
+
+def _title_key(
+    title: str,
+) -> str:
+    normalized = (
+        title
+        .lower()
+        .replace("’", "'")
+    )
+
+    normalized = "".join(
+        char
+        if char.isalnum()
+        else " "
+        for char in normalized
+    )
+
+    return " ".join(
+        normalized.split()
+    )
+
+
+def _deduplicate_titles(
+    candidates: list[ResearchCandidate],
+) -> list[ResearchCandidate]:
+    """
+    Remove exact normalized-title duplicates.
+    """
+
+    seen: set[str] = set()
+
+    result: list[
+        ResearchCandidate
+    ] = []
+
+    for candidate in candidates:
+        key = _title_key(
+            candidate.title
+        )
+
+        if not key:
+            result.append(candidate)
+            continue
+
+        if key in seen:
+            continue
+
+        seen.add(key)
+        result.append(candidate)
+
+    return result
+
+
+def _source_access_mode(
+    source: Any,
+) -> str:
+    return getattr(
+        source,
+        "access_mode",
+        "",
+    )
+
+
+def _source_name(
+    source: Any,
+) -> str:
+    return getattr(
+        source,
+        "name",
+        "",
+    )
+
+
+def _source_category(
+    source: Any,
+) -> str:
+    return getattr(
+        source,
+        "category",
+        "",
+    )
+
+
+async def _fetch_source_results(
+    source: Any,
+    query: str,
+    lookback_days: int,
+    max_results: int,
+) -> list[ResearchCandidate]:
+    """
+    Dispatch a source through its API, MCP, or web adapter.
+
+    Hard-caps the result count even when an upstream source
+    ignores the requested limit.
+    """
+
+    access_mode = _source_access_mode(
+        source
+    )
+
+    source_name = _source_name(
+        source
+    )
+
+    source_name_lower = (
+        source_name.lower()
+    )
+
+    candidates: list[
+        ResearchCandidate
+    ] = []
+
+    # --------------------------------------------------------
+    # API sources
+    # --------------------------------------------------------
+
+    if access_mode == "api":
+
+        if source_name_lower == "arxiv":
+            candidates = await search_arxiv(
+                query=query,
+                lookback_days=lookback_days,
+                max_results=max_results,
+            )
+
+        elif source_name_lower == "crossref":
+            candidates = await search_crossref(
+                query=query,
+                lookback_days=lookback_days,
+                max_results=max_results,
+            )
+
+        elif (
+            source_name_lower
+            == "semantic scholar"
+        ):
+            candidates = await search_semantic_scholar(
+                query=query,
+                lookback_days=lookback_days,
+                max_results=max_results,
+            )
+
+    # --------------------------------------------------------
+    # MCP sources
+    # --------------------------------------------------------
+
+    elif access_mode == "mcp":
+        candidates = await search_mcp_source(
+            source_name,
+            query,
+            lookback_days,
+            max_results,
+        )
+
+    # --------------------------------------------------------
+    # Web sources
+    # --------------------------------------------------------
+
+    elif access_mode == "web":
+        candidates = await search_web_source(
+            source_name,
+            query,
+            lookback_days,
+            max_results,
+        )
+
+    # --------------------------------------------------------
+    # Final safety cap
+    # --------------------------------------------------------
+
+    return candidates[:max_results]
+
+
+def _get_section_plans(
+    plan: ResearchPlan,
+) -> list[Any]:
+    """
+    Support either `sections` or `section_plans`.
+    """
+
+    sections = getattr(
+        plan,
+        "sections",
+        None,
+    )
+
+    if sections:
+        return list(
+            sections
+        )
+
+    section_plans = getattr(
+        plan,
+        "section_plans",
+        None,
+    )
+
+    if section_plans:
+        return list(
+            section_plans
+        )
+
+    return []
+
+
+def _section_queries(
+    plan: ResearchPlan,
+    section: Any,
+) -> list[str]:
+    """
+    Prefer section-specific queries.
+
+    When a section has no explicit queries, use only the first
+    global planner query. This prevents the same source from
+    being queried repeatedly for every global query.
+    """
+
+    section_queries = getattr(
+        section,
+        "queries",
+        None,
+    )
+
+    if section_queries:
+        return list(
+            section_queries
+        )[:MAX_QUERIES_PER_SECTION]
+
+    plan_queries = list(
+        getattr(
+            plan,
+            "queries",
+            [],
+        )
+    )
+
+    if not plan_queries:
+        return []
+
+    return plan_queries[
+        :MAX_QUERIES_PER_SECTION
+    ]
+
+
+# ============================================================
+# Orchestrator
+# ============================================================
 
 class ResearchOrchestrator:
+
     async def research(
         self,
-        plan,
+        plan: ResearchPlan,
     ) -> list[ResearchCandidate]:
+        """
+        Discovery-only research stage.
 
-        candidates: list[
+        Pipeline:
+
+            section/source routing
+                ↓
+            source discovery
+                ↓
+            URL deduplication
+                ↓
+            relevance filtering
+                ↓
+            title deduplication
+
+        Freshness and ranking remain graph responsibilities.
+        """
+
+        raw_candidates: list[
             ResearchCandidate
         ] = []
 
-        # ========================================================
-        # SECTION LOOP
-        # ========================================================
+        sections = _get_section_plans(
+            plan
+        )
 
-        for section in plan.sections:
-
+        if not sections:
             print(
-                "\n"
-                + "=" * 60
+                "[Orchestrator] "
+                "No section plans found."
             )
+            return []
 
-            print(
-                "[Research] SECTION: "
-                f"{section.section}"
-            )
+        # ----------------------------------------------------
+        # 1. Source discovery
+        # ----------------------------------------------------
 
-            print(
-                "[Research] Lookback: "
-                f"{section.lookback_days} days"
-            )
+        for section in sections:
 
             sources = route_sources(
                 section
             )
 
-            print(
-                "[Research] Sources: "
-                + (
-                    ", ".join(
-                        source.name
-                        for source in sources
-                    )
-                    if sources
-                    else "none"
-                )
+            if not sources:
+                continue
+
+            queries = _section_queries(
+                plan,
+                section,
             )
 
-            # ====================================================
-            # SOURCE LOOP
-            # ====================================================
+            if not queries:
+                continue
 
-            for source in sources:
+            for query in queries:
 
-                effective_lookback = (
-                    get_effective_lookback(
-                        section,
-                        source,
+                for source in sources:
+
+                    source_name = _source_name(
+                        source
                     )
-                )
 
-                print(
-                    f"\n[Research] "
-                    f"{source.name} "
-                    f"(mode={source.access_mode}, "
-                    f"lookback="
-                    f"{effective_lookback}d)"
-                )
+                    category = _source_category(
+                        source
+                    )
 
-                # =================================================
-                # QUERY LOOP
-                # =================================================
-
-                for query in section.queries:
+                    lookback_days = (
+                        get_effective_lookback(
+                            section,
+                            source,
+                        )
+                    )
 
                     try:
 
-                        results = (
-                            await self._fetch_source_results(
+                        candidates = (
+                            await _fetch_source_results(
                                 source=source,
                                 query=query,
-                                effective_lookback=(
-                                    effective_lookback
-                                ),
-                                max_results=(
-                                    section
-                                    .max_results_per_source
-                                ),
+                                lookback_days=lookback_days,
+                                max_results=DEFAULT_SOURCE_RESULTS,
                             )
                         )
 
-                        # =========================================
-                        # RELEVANCE FILTER
-                        # =========================================
-
-                        relevant = [
-                            candidate
-                            for candidate in results
-                            if is_relevant(
-                                candidate,
-                                query,
-                            )
-                        ]
-
-                        candidates.extend(
-                            relevant
+                        raw_candidates.extend(
+                            candidates
                         )
 
                         print(
-                            f"[Research] "
-                            f"{source.name} "
-                            f"'{query}': "
-                            f"{len(results)} raw "
-                            f"→ "
-                            f"{len(relevant)} relevant"
+                            f"[Orchestrator] "
+                            f"{category} / "
+                            f"{source_name} / "
+                            f"{query}: "
+                            f"{len(candidates)}"
                         )
 
                     except Exception as error:
 
                         print(
-                            f"[Research] "
-                            f"{source.name} "
-                            f"failed for "
-                            f"'{query}': "
+                            f"[Orchestrator] "
+                            f"{source_name} failed: "
+                            f"{type(error).__name__}: "
                             f"{error}"
                         )
 
-        # ========================================================
-        # GLOBAL MERGING
-        # ========================================================
+        print(
+            f"[Orchestrator] "
+            f"{len(raw_candidates)} raw candidates"
+        )
+
+        # ----------------------------------------------------
+        # 2. URL deduplication
+        # ----------------------------------------------------
+
+        merged = _merge_candidates(
+            raw_candidates
+        )
 
         print(
-            "\n[Research] Raw relevant "
-            f"candidates: {len(candidates)}"
+            f"[Orchestrator] "
+            f"{len(merged)} after URL merge"
         )
 
-        merged_candidates = merge_candidates(
-            candidates
-        )
-
-        print(
-            "[Research] After cross-source "
-            f"merging: "
-            f"{len(merged_candidates)}"
-        )
-
-        return merged_candidates
-
-    async def _fetch_source_results(
-        self,
-        source,
-        query: str,
-        effective_lookback: int,
-        max_results: int,
-    ) -> list[ResearchCandidate]:
-
-        # ========================================================
-        # API SOURCES
-        # ========================================================
-
-        if source.access_mode == "api":
-
-            if source.name == "arXiv":
-
-                return await search_arxiv(
-                    query=query,
-                    lookback_days=effective_lookback,
-                    max_results=max_results,
-                )
-
-            if source.name == "Crossref":
-
-                return await search_crossref(
-                    query=query,
-                    lookback_days=effective_lookback,
-                    max_results=max_results,
-                )
-
-            if source.name == "Semantic Scholar":
-
-                return await search_semantic_scholar(
-                    query=query,
-                    lookback_days=effective_lookback,
-                    max_results=max_results,
-                )
-
-            print(
-                "[Research] "
-                f"API adapter not implemented "
-                f"for {source.name}"
-            )
-
+        if not merged:
             return []
 
-        # ========================================================
-        # MCP SOURCES
-        # ========================================================
+        # ----------------------------------------------------
+        # 3. Relevance filtering
+        # ----------------------------------------------------
 
-        if source.access_mode == "mcp":
-
-            return await search_mcp_source(
-                source_name=source.name,
-                query=query,
-                lookback_days=effective_lookback,
-                max_results=max_results,
+        plan_queries = list(
+            getattr(
+                plan,
+                "queries",
+                [],
             )
-
-        # ========================================================
-        # WEB SOURCES
-        # ========================================================
-
-        if source.access_mode == "web":
-
-            print(
-                "[Research] "
-                f"{source.name}: "
-                "web adapter not implemented yet"
-            )
-
-            return []
-
-        # ========================================================
-        # UNKNOWN ACCESS MODE
-        # ========================================================
-
-        print(
-            "[Research] "
-            f"{source.name}: "
-            f"unsupported access mode "
-            f"'{source.access_mode}'"
         )
 
-        return []
+        relevant: list[
+            ResearchCandidate
+        ] = []
+
+        for candidate in merged:
+
+            candidate_relevant = False
+
+            for query in plan_queries:
+
+                try:
+
+                    if is_relevant(
+                        candidate,
+                        query,
+                    ):
+                        candidate_relevant = True
+                        break
+
+                except Exception as error:
+
+                    print(
+                        "[Orchestrator] "
+                        f"relevance failed for "
+                        f"{candidate.url}: "
+                        f"{type(error).__name__}: "
+                        f"{error}"
+                    )
+
+            if candidate_relevant:
+                relevant.append(
+                    candidate
+                )
+
+        print(
+            f"[Orchestrator] "
+            f"{len(relevant)} relevant candidates"
+        )
+
+        if not relevant:
+            return []
+
+        # ----------------------------------------------------
+        # 4. Title deduplication
+        # ----------------------------------------------------
+
+        relevant = _deduplicate_titles(
+            relevant
+        )
+
+        print(
+            f"[Orchestrator] "
+            f"{len(relevant)} after title merge"
+        )
+
+        return relevant

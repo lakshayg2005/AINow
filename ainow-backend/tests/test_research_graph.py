@@ -1,9 +1,8 @@
 import asyncio
 
-from app.graph.research_graph import research_graph
-
 
 async def main():
+    from app.graph.research_graph import research_graph
 
     result = await research_graph.ainvoke(
         {
@@ -17,7 +16,7 @@ async def main():
 
     ranked = result.get(
         "ranked_candidates",
-        []
+        [],
     )
 
     print(
@@ -25,9 +24,9 @@ async def main():
         len(
             result.get(
                 "candidates",
-                []
+                [],
             )
-        )
+        ),
     )
 
     print(
@@ -35,15 +34,14 @@ async def main():
         len(
             result.get(
                 "fresh_candidates",
-                []
+                [],
             )
-        )
+        ),
     )
 
     print("\nTop candidates:")
 
     for item in ranked[:10]:
-
         candidate = item.candidate
 
         print(
@@ -66,7 +64,6 @@ async def main():
     )
 
     if selection:
-
         print(
             "Selected:",
             selection.selected_candidate_indices,
@@ -98,7 +95,6 @@ async def main():
         )
 
     else:
-
         print(
             "No editorial selection was produced."
         )
@@ -116,11 +112,9 @@ async def main():
     )
 
     if not content:
-
         print(
             "No newsletter content was generated."
         )
-
         return
 
     # --------------------------------------------------
@@ -132,7 +126,6 @@ async def main():
     )
 
     for item in content.quick_news:
-
         print(
             f"\n{item.headline}"
         )
@@ -143,7 +136,7 @@ async def main():
 
         print(
             "Why it matters:",
-            item.why_it_matters
+            item.why_it_matters,
         )
 
     # --------------------------------------------------
@@ -155,14 +148,13 @@ async def main():
     )
 
     for item in content.research_spotlight:
-
         print(
             f"\n{item.title}"
         )
 
         print(
             "Why it matters:",
-            item.why_it_matters
+            item.why_it_matters,
         )
 
     # --------------------------------------------------
@@ -174,18 +166,16 @@ async def main():
     )
 
     if content.paper_of_week:
-
         print(
             content.paper_of_week.title
         )
 
         print(
             "Why it matters:",
-            content.paper_of_week.why_it_matters
+            content.paper_of_week.why_it_matters,
         )
 
     else:
-
         print(
             "No Paper of the Week selected."
         )
@@ -199,7 +189,6 @@ async def main():
     )
 
     if content.deep_dive:
-
         print(
             content.deep_dive.title
         )
@@ -209,7 +198,6 @@ async def main():
         )
 
     else:
-
         print(
             "No Deep Dive generated."
         )
@@ -223,7 +211,6 @@ async def main():
     )
 
     for item in content.trends:
-
         print(
             f"\n{item.title}"
         )
@@ -241,7 +228,6 @@ async def main():
     )
 
     if content.concept:
-
         print(
             content.concept.concept
         )
@@ -251,7 +237,6 @@ async def main():
         )
 
     else:
-
         print(
             "No AI concept generated."
         )
@@ -265,7 +250,6 @@ async def main():
     )
 
     for resource in content.resources:
-
         print(
             f"\n{resource.name}"
         )
@@ -299,16 +283,16 @@ async def main():
     )
 
     for url in content.source_urls:
-
         print(
             url
         )
+
     print(
-    "\nNewsletter Issue ID:",
-    result.get(
-        "newsletter_issue_id"
+        "\nNewsletter Issue ID:",
+        result.get(
+            "newsletter_issue_id"
+        ),
     )
-    )    
 
 
 if __name__ == "__main__":
