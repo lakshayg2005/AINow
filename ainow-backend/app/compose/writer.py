@@ -41,6 +41,15 @@ STYLE_RULES = """Rules:
 - Plain text only: no markdown, no URLs.
 - Return ONLY valid JSON."""
 
+# Some models emit non-breaking hyphens and narrow spaces
+# ("GPT-6" with U+2011), which break search and copy-paste.
+_TYPOGRAPHY = str.maketrans({
+    0x2010: "-",  # hyphen
+    0x2011: "-",  # non-breaking hyphen
+    0x00A0: " ",  # no-break space
+    0x202F: " ",  # narrow no-break space
+})
+
 _INLINE_CITATION = re.compile(
     r"\s*\[(?:S?\d+)(?:\s*,\s*S?\d+)*\]"
 )
@@ -115,6 +124,7 @@ def _text(
     # Inline "[16]" citations use pre-renumbering ids; refs
     # carry citations instead.
     value = _INLINE_CITATION.sub("", str(entry.get(key) or ""))
+    value = value.translate(_TYPOGRAPHY)
     return truncate(" ".join(value.split()), limit) or ""
 
 
@@ -498,8 +508,10 @@ Produce:
   just capability". Bad: "Advancements in AI Models", "AI Safety and Risk".
   Each: title, explanation (2 sentences), evidence (1 sentence that names
   the stories in words; never mention ids), story_ids (at least 2 ids).
-- concept: one AI concept a reader needs to understand one of this issue's
-  top stories (prefer the deep dive or a quick news story). Fields: concept,
+- concept: one general, reusable AI idea a reader needs to understand one
+  of this issue's top stories (prefer the deep dive or a quick news story),
+  e.g. "test-time compute", "mixture of experts", "model distillation".
+  Never the name of a paper, product or model. Fields: concept,
   simple_explanation (2 sentences, no jargon), technical_explanation (2-3
   sentences), example (1 sentence tied to the story), related_story_id.
   General background knowledge is allowed here.

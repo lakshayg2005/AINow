@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     ollama_base_url: str | None = None
 
     # Optional explicit chains, e.g.
-    # "groq:llama-3.1-8b-instant,hf:Qwen/Qwen3-8B"
+    # "groq:openai/gpt-oss-20b,hf:Qwen/Qwen3-8B"
     llm_fast_chain: str | None = None
     llm_strong_chain: str | None = None
 

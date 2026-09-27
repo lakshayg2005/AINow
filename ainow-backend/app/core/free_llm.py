@@ -13,7 +13,7 @@ Tiers:
 Model names on free tiers change often. Override any chain
 in .env, e.g.
 
-    LLM_FAST_CHAIN=groq:llama-3.1-8b-instant,hf:Qwen/Qwen3-8B
+    LLM_FAST_CHAIN=groq:openai/gpt-oss-20b,hf:Qwen/Qwen3-8B
 """
 
 from __future__ import annotations
@@ -49,8 +49,8 @@ def _providers() -> dict[str, Provider]:
             name="groq",
             base_url="https://api.groq.com/openai/v1",
             api_key=settings.groq_api_key,
-            fast_model="llama-3.1-8b-instant",
-            strong_model="llama-3.3-70b-versatile",
+            fast_model="openai/gpt-oss-20b",
+            strong_model="openai/gpt-oss-120b",
         ),
         "cerebras": Provider(
             name="cerebras",
@@ -213,31 +213,75 @@ _cooldown: dict[str, float] = {}
 COOLDOWN_SECONDS = 300
 
 
+# Free tiers limit tokens per minute; waiting out a short
+# window is far better than dropping to a weaker provider.
+MAX_RATE_LIMIT_WAIT = 75
+RATE_LIMIT_RETRIES = 3
+
+_RETRY_IN = re.compile(r"try again in (?:(\d+)m)?([\d.]+)s", re.IGNORECASE)
+
+
+def _retry_after_seconds(
+    response: httpx.Response,
+) -> float | None:
+    header = response.headers.get("retry-after")
+
+    if header:
+        try:
+            return float(header)
+        except ValueError:
+            pass
+
+    match = _RETRY_IN.search(response.text)
+
+    if match:
+        return int(match.group(1) or 0) * 60 + float(match.group(2))
+
+    return None
+
+
 async def _post_with_retry(
     client: httpx.AsyncClient,
     url: str,
     api_key: str | None,
     payload: dict[str, Any],
-    attempts: int = 2,
+    attempts: int = 3,
 ) -> httpx.Response:
     """
-    Retry connection-level failures once; a dropped
-    connection shouldn't cost a provider its whole run.
+    Retry dropped connections, and wait out short 429
+    rate-limit windows (per-minute token budgets).
     """
 
-    for attempt in range(1, attempts + 1):
+    transport_failures = 0
+    rate_limit_waits = 0
+
+    while True:
         try:
-            return await client.post(
+            response = await client.post(
                 url,
                 headers={"Authorization": f"Bearer {api_key}"},
                 json=payload,
             )
         except httpx.TransportError:
-            if attempt == attempts:
-                raise
-            await asyncio.sleep(2)
+            transport_failures += 1
 
-    raise AssertionError("unreachable")
+            if transport_failures >= attempts:
+                raise
+
+            await asyncio.sleep(2)
+            continue
+
+        if response.status_code != 429 or rate_limit_waits >= RATE_LIMIT_RETRIES:
+            return response
+
+        wait = _retry_after_seconds(response)
+
+        if wait is None or wait > MAX_RATE_LIMIT_WAIT:
+            return response
+
+        rate_limit_waits += 1
+        print(f"[LLM] Rate limited; waiting {wait + 1:.0f}s")
+        await asyncio.sleep(wait + 1)
 
 
 async def chat_json(
@@ -291,6 +335,11 @@ async def chat_json(
                 if provider.json_mode:
                     payload["response_format"] = {"type": "json_object"}
 
+                # gpt-oss reasons before answering; its hidden
+                # reasoning tokens count against max_tokens.
+                if "gpt-oss" in model:
+                    payload["reasoning_effort"] = "low"
+
                 try:
                     response = await _post_with_retry(
                         client,
@@ -335,5 +384,6 @@ async def chat_json(
                         ]
 
     raise LLMUnavailable(
-        "All LLM providers failed: " + "; ".join(errors)
+        "All LLM providers failed: "
+        + ("; ".join(errors) or "all are cooling down after earlier errors")
     )
