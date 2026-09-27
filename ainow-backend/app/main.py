@@ -1,15 +1,15 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.db.database import Base, engine
-from app.db import models
+from app.db.database import engine
+from app.db.schema_patches import ensure_schema
 from app.routes.auth import router as auth_router
 from app.routes.subscriptions import router as subscription_router
 from app.routes.newsletters import router as newsletter_router
 from app.routes.content import router as content_router
 
 
-Base.metadata.create_all(bind=engine)
+ensure_schema(engine)
 
 
 app = FastAPI(
