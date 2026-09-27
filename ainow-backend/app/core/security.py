@@ -54,3 +54,31 @@ def decode_access_token(token: str) -> dict:
         )
     except JWTError:
         raise ValueError("Invalid or expired token")
+
+# Unsubscribe links must work without logging in and never
+# expire (people unsubscribe from old emails), so they carry
+# a signed, purpose-scoped token instead of a session.
+UNSUBSCRIBE_PURPOSE = "unsubscribe"
+
+
+def create_unsubscribe_token(user_id: int) -> str:
+    return jwt.encode(
+        {
+            "sub": str(user_id),
+            "purpose": UNSUBSCRIBE_PURPOSE,
+        },
+        settings.jwt_secret_key,
+        algorithm=settings.jwt_algorithm,
+    )
+
+
+def decode_unsubscribe_token(token: str) -> int:
+    payload = decode_access_token(token)
+
+    if payload.get("purpose") != UNSUBSCRIBE_PURPOSE:
+        raise ValueError("Not an unsubscribe token")
+
+    try:
+        return int(payload["sub"])
+    except (KeyError, TypeError, ValueError):
+        raise ValueError("Invalid unsubscribe token")

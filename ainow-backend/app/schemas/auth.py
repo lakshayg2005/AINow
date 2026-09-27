@@ -32,6 +32,7 @@ class CurrentUserResponse(BaseModel):
     name: str
     email: EmailStr
     is_email_verified: bool
+    is_admin: bool = False
 
 class VerifyEmailResponse(BaseModel):
     message: str

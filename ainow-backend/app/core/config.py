@@ -24,6 +24,23 @@ class Settings(BaseSettings):
     # Used for "read on the web" links in emails.
     frontend_url: str = "http://localhost:5173"
 
+    # Public URL of this API; one-click unsubscribe (RFC 8058)
+    # posts here straight from the mail client.
+    api_url: str = "http://127.0.0.1:8000"
+
+    # Built-in scheduler (runs inside the API process; use a
+    # single worker when enabled).
+    scheduler_enabled: bool = False
+    ingest_every_hours: float = 6
+    # 0 = Monday ... 6 = Sunday, in UTC
+    compose_weekday: int = 6
+    compose_hour_utc: int = 6
+    # Off by default: a human reviews each draft first.
+    auto_publish: bool = False
+
+    # Pause between emails; Gmail SMTP throttles bursts.
+    email_send_interval_seconds: float = 1.0
+
     # Free LLM providers (OpenAI-compatible). Any that have a
     # key are tried in order; see app/core/free_llm.py.
     groq_api_key: str | None = None

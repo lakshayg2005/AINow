@@ -41,6 +41,14 @@ class User(Base):
         nullable=False,
     )
 
+    # Admins can run the pipeline, review drafts and publish.
+    # Grant with: python -m app.admin make-admin <email>
+    is_admin: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=datetime.utcnow,
@@ -814,6 +822,73 @@ class CoveredStory(Base):
         default=datetime.utcnow,
         nullable=False,
         index=True,
+    )
+
+
+class PipelineJob(Base):
+    """
+    One background run of ingest / compose / deliver, started
+    by the scheduler or from the admin dashboard.
+    """
+
+    __tablename__ = "pipeline_jobs"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+
+    kind: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        index=True,
+    )
+    # ingest, compose, deliver
+
+    status: Mapped[str] = mapped_column(
+        String(30),
+        default="queued",
+        nullable=False,
+        index=True,
+    )
+    # queued, running, completed, failed
+
+    trigger: Mapped[str] = mapped_column(
+        String(30),
+        default="manual",
+        nullable=False,
+    )
+    # manual, schedule
+
+    params: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        default=dict,
+        nullable=False,
+    )
+
+    result: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        default=dict,
+        nullable=False,
+    )
+
+    error: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        nullable=False,
+        index=True,
+    )
+
+    started_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
+    finished_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime,
+        nullable=True,
     )
 
 

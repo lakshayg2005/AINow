@@ -159,22 +159,6 @@ export async function getNewsletter(
   return response.json()
 }
 
-export async function getNewsletterPreview(
-  newsletterId
-) {
-  const response = await fetch(
-    `${API_BASE_URL}/newsletters/${newsletterId}/preview`
-  )
-
-  if (!response.ok) {
-    throw new Error(
-      "Failed to fetch newsletter preview"
-    )
-  }
-
-  return response.json()
-}
-
 export async function resendVerification(email) {
   const response = await fetch(
     `${API_BASE_URL}/auth/resend-verification`,
@@ -196,6 +180,106 @@ export async function resendVerification(email) {
       data.detail ||
       "Failed to resend verification email."
     )
+  }
+
+  return data
+}
+
+// ---------------------------------------------------------
+// Authenticated requests
+// ---------------------------------------------------------
+
+async function authRequest(path, { method = "GET", body } = {}) {
+  const token = localStorage.getItem("access_token")
+
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method,
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+    },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  })
+
+  const data = await response.json().catch(() => ({}))
+
+  if (!response.ok) {
+    throw new Error(
+      (typeof data.detail === "string" && data.detail) ||
+      `Request failed (${response.status})`
+    )
+  }
+
+  return data
+}
+
+// Drafts are admin-only.
+export function getNewsletterPreview(newsletterId) {
+  return authRequest(`/newsletters/${newsletterId}/preview`)
+}
+
+// ---------------------------------------------------------
+// Admin
+// ---------------------------------------------------------
+
+export function getAdminOverview() {
+  return authRequest("/admin/overview")
+}
+
+export function getAdminIssues() {
+  return authRequest("/admin/issues")
+}
+
+export function startIngestJob() {
+  return authRequest("/admin/jobs/ingest", { method: "POST" })
+}
+
+export function startComposeJob(days = 7) {
+  return authRequest("/admin/jobs/compose", { method: "POST", body: { days } })
+}
+
+export function getJob(jobId) {
+  return authRequest(`/admin/jobs/${jobId}`)
+}
+
+export function sendTestEmail(issueId, email) {
+  return authRequest(`/admin/issues/${issueId}/test-send`, {
+    method: "POST",
+    body: email ? { email } : {},
+  })
+}
+
+export function publishIssue(issueId) {
+  return authRequest(`/admin/issues/${issueId}/publish`, { method: "POST" })
+}
+
+export function retryFailedDeliveries(issueId) {
+  return authRequest(`/admin/issues/${issueId}/retry-failed`, { method: "POST" })
+}
+
+export function getDeliveries(issueId) {
+  return authRequest(`/admin/issues/${issueId}/deliveries`)
+}
+
+export function deleteDraft(issueId) {
+  return authRequest(`/admin/issues/${issueId}`, { method: "DELETE" })
+}
+
+// ---------------------------------------------------------
+// Unsubscribe (no login; token from the email link)
+// ---------------------------------------------------------
+
+export async function unsubscribeWithToken(token) {
+  const response = await fetch(`${API_BASE_URL}/subscriptions/unsubscribe`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token }),
+  })
+
+  const data = await response.json().catch(() => ({}))
+
+  if (!response.ok) {
+    throw new Error(data.detail || "Unsubscribe failed.")
   }
 
   return data

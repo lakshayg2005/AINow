@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
+import { useAuth } from "../context/AuthContext"
 
 import {
   loginUser,
@@ -8,6 +9,7 @@ import {
 
 function Login() {
   const navigate = useNavigate()
+  const { refreshUser } = useAuth()
 
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -69,6 +71,10 @@ function Login() {
         "access_token",
         data.access_token
       )
+
+      // Load the user into the auth context first, otherwise
+      // the protected /dashboard route still sees "logged out".
+      await refreshUser()
 
       navigate("/dashboard")
 

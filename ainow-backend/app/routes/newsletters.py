@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.db.models import NewsletterIssue, NewsletterSection
+from app.db.models import NewsletterIssue, NewsletterSection, User
 from app.schemas.newsletter import (
     NewsletterCreateRequest,
     NewsletterCreateResponse,
@@ -13,10 +13,10 @@ from app.schemas.newsletter import (
     NewsletterSectionResponse,
     NewsletterSummaryResponse,
 )
-from app.compose.persist import load_issue_content, mark_issue_covered
-from app.services.email.sender import (
-    send_newsletter_to_subscribers,
-)
+from app.compose.persist import load_issue_content
+from app.core.dependencies import get_current_admin
+from app.jobs import JobConflict, start_job
+from app.services.publishing import PublishError, publish_issue
 
 
 def _summary(
@@ -79,6 +79,7 @@ router = APIRouter(
 def create_newsletter(
     newsletter_data: NewsletterCreateRequest,
     db: Session = Depends(get_db),
+    _admin: User = Depends(get_current_admin),
 ):
     newsletter = NewsletterIssue(
         title=newsletter_data.title,
@@ -105,6 +106,7 @@ def add_newsletter_section(
     newsletter_id: int,
     section_data: NewsletterSectionCreateRequest,
     db: Session = Depends(get_db),
+    _admin: User = Depends(get_current_admin),
 ):
     newsletter = (
         db.query(NewsletterIssue)
@@ -151,6 +153,7 @@ def save_newsletter_html(
     newsletter_id: int,
     html_content: str,
     db: Session = Depends(get_db),
+    _admin: User = Depends(get_current_admin),
 ):
     newsletter = (
         db.query(NewsletterIssue)
@@ -189,8 +192,9 @@ def save_newsletter_html(
     "/{newsletter_id}/publish",
     status_code=status.HTTP_200_OK,
 )
-def publish_newsletter(
+async def publish_newsletter(
     newsletter_id: int,
+    _admin: User = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ):
     newsletter = (
@@ -205,65 +209,28 @@ def publish_newsletter(
             detail="Newsletter not found",
         )
 
-    if newsletter.status == "published":
+    try:
+        stories_recorded = publish_issue(db, newsletter)
+    except PublishError as error:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Newsletter is already published",
+            detail=str(error),
         )
 
-    if not newsletter.html_content:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Final HTML has not been generated yet",
-        )
-
-    sections = (
-        db.query(NewsletterSection)
-        .filter(NewsletterSection.newsletter_issue_id == newsletter_id)
-        .count()
-    )
-
-    if sections == 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Newsletter must contain at least one section",
-        )
-
-    newsletter.status = "published"
-    newsletter.published_at = datetime.utcnow()
-
-    db.commit()
-    db.refresh(newsletter)
-
-    # Remember what this issue told readers so later issues
-    # don't repeat it.
-    stories_recorded = mark_issue_covered(db, newsletter)
-
-    delivery_results = (
-    send_newsletter_to_subscribers(
-        db=db,
-        newsletter=newsletter,
-    )
-    )
+    # Sending to every subscriber takes a while; do it in the
+    # background and let the caller poll /admin/jobs/{id}.
+    try:
+        job = start_job("deliver", params={"issue_id": newsletter.id})
+        job_id = job.id
+    except JobConflict:
+        job_id = None
 
     return {
-        "message": "Newsletter published successfully",
+        "message": "Newsletter published; delivery started",
         "newsletter_id": newsletter.id,
         "published_at": newsletter.published_at,
         "stories_recorded": stories_recorded,
-        "delivery_summary": {
-            "total": len(delivery_results),
-            "sent": sum(
-                1
-                for item in delivery_results
-                if item["status"] == "sent"
-            ),
-            "failed": sum(
-                1
-                for item in delivery_results
-                if item["status"] == "failed"
-            ),
-        },
+        "delivery_job_id": job_id,
     }
 
 
@@ -299,6 +266,7 @@ def get_newsletters(
 def preview_newsletter(
     newsletter_id: int,
     db: Session = Depends(get_db),
+    _admin: User = Depends(get_current_admin),
 ):
     newsletter = db.get(NewsletterIssue, newsletter_id)
 

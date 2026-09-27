@@ -1,4 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+
+from app.core.dependencies import get_current_admin
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
@@ -29,6 +31,7 @@ from app.core.embeddings import generate_embedding
 
 router = APIRouter(
     prefix="/content",
+    dependencies=[Depends(get_current_admin)],
     tags=["Newsletter Content"],
 )
 

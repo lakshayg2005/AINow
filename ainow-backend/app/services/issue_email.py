@@ -296,6 +296,7 @@ def render_issue_email(
     content: IssueContent,
     web_url: str,
     manage_url: str | None = None,
+    unsubscribe_url: str | None = None,
 ) -> str:
     sources = {ref.id: ref for ref in content.sources}
     date = f"{content.issue_date:%B} {content.issue_date.day}, {content.issue_date.year}"
@@ -366,6 +367,11 @@ def render_issue_email(
         else ""
     )
 
+    if unsubscribe_url:
+        manage += (
+            f' · <a href="{_e(unsubscribe_url)}" style="color:{FAINT};">Unsubscribe</a>'
+        )
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -414,3 +420,113 @@ def render_issue_email(
 </table>
 </body>
 </html>"""
+
+
+
+# ============================================================
+# Plain-text alternative
+# ============================================================
+
+def render_issue_text(
+    content: IssueContent,
+    web_url: str,
+    unsubscribe_url: str | None = None,
+) -> str:
+    """
+    Plain-text version of the issue: shown by text-only
+    clients, and HTML-only mail scores worse with spam filters.
+    """
+
+    date = f"{content.issue_date:%B} {content.issue_date.day}, {content.issue_date.year}"
+    sources = {ref.id: ref for ref in content.sources}
+
+    def refs(ids: list[int]) -> str:
+        return " ".join(f"[{ref}]" for ref in ids if ref in sources)
+
+    lines = [
+        f"AINow — {date}",
+        "",
+        content.headline or content.title,
+        "",
+        content.intro,
+        "",
+        f"Read on the web: {web_url}",
+    ]
+
+    def section(title: str) -> None:
+        lines.extend(["", "=" * 60, title.upper(), "=" * 60])
+
+    if content.quick_news:
+        section("Quick News")
+
+        for card in content.quick_news:
+            prefix = "UPDATE: " if card.is_update else ""
+            lines.extend(["", f"* {prefix}{card.headline}", f"  {card.summary}"])
+
+            if card.why_it_matters:
+                lines.append(f"  Why it matters: {card.why_it_matters}")
+
+            lines.append(f"  {refs(card.refs)}")
+
+    papers = ([content.paper_of_week] if content.paper_of_week else []) + list(content.research_spotlight)
+
+    if papers:
+        section("Research Spotlight")
+
+        for index, card in enumerate(papers):
+            star = "PAPER OF THE WEEK: " if content.paper_of_week and index == 0 else ""
+            lines.extend(["", f"* {star}{card.title}"])
+
+            for label, value in (
+                ("Problem", card.problem),
+                ("Idea", card.core_idea),
+                ("Result", card.key_result),
+            ):
+                if value:
+                    lines.append(f"  {label}: {value}")
+
+            if card.paper_url:
+                lines.append(f"  {card.paper_url}")
+
+    if content.deep_dive:
+        dive = content.deep_dive
+        section(f"Deep Dive: {dive.title}")
+        lines.extend(["", dive.introduction])
+
+        for part in dive.sections:
+            lines.extend(["", part.heading, part.body])
+
+        lines.append(refs(dive.refs))
+
+    if content.trends:
+        section("AI Trends")
+
+        for index, card in enumerate(content.trends, start=1):
+            lines.extend(["", f"{index}. {card.title}", f"   {card.explanation}"])
+
+    if content.concept:
+        concept = content.concept
+        section(f"Concept of the Week: {concept.concept}")
+        lines.extend(["", concept.simple_explanation, "", concept.technical_explanation])
+
+    if content.resources:
+        section("Tools & Resources")
+
+        for card in content.resources:
+            lines.extend(["", f"* {card.name} ({card.resource_type})", f"  {card.description}", f"  {card.url}"])
+
+    if content.our_take:
+        section("Our Take")
+        lines.extend(["", content.our_take])
+
+    if content.sources:
+        section("Sources")
+        lines.append("")
+        lines.extend(f"[{ref.id}] {ref.title} — {ref.url}" for ref in content.sources)
+
+    lines.extend(["", "-" * 60, "You're receiving this because you subscribed to AINow."])
+
+    if unsubscribe_url:
+        lines.append(f"Unsubscribe: {unsubscribe_url}")
+
+    return "\n".join(lines) + "\n"

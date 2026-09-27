@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { Link } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
 import {
   getSubscription,
@@ -6,56 +7,23 @@ import {
   cancelSubscription,
 } from "../services/api"
 
-
-async function handleSubscribe() {
-  const token = localStorage.getItem("access_token")
-
-  try {
-    const data = await subscribeUser(token)
-    setSubscription(data)
-  } catch (error) {
-    setSubscriptionError(error.message)
-  }
-}
-
-
-async function handleCancelSubscription() {
-  const token = localStorage.getItem("access_token")
-
-  try {
-    const data = await cancelSubscription(token)
-    setSubscription(data)
-  } catch (error) {
-    setSubscriptionError(error.message)
-  }
-}
-
 function Dashboard() {
-  const { user, loading } = useAuth()
+  const { user } = useAuth()
 
- const [subscription, setSubscription] = useState(null)
- const [subscriptionLoading, setSubscriptionLoading] = useState(true)
- const [subscriptionError, setSubscriptionError] = useState("")
+  const [subscription, setSubscription] = useState(null)
+  const [subscriptionLoading, setSubscriptionLoading] = useState(true)
+  const [subscriptionError, setSubscriptionError] = useState("")
+  const [updating, setUpdating] = useState(false)
 
-  // if (loading) {
-  //   return (
-  //     <div className="flex min-h-screen items-center justify-center bg-black text-white">
-  //       <p className="text-gray-400">Loading dashboard...</p>
-  //     </div>
-  //   )
-  // }
-
-  // if (!user) {
-  //   return null
-  // }
   useEffect(() => {
     async function loadSubscription() {
       const token = localStorage.getItem("access_token")
-  
+
       if (!token) {
+        setSubscriptionLoading(false)
         return
       }
-  
+
       try {
         const data = await getSubscription(token)
         setSubscription(data)
@@ -65,11 +33,31 @@ function Dashboard() {
         setSubscriptionLoading(false)
       }
     }
-  
+
     if (user) {
       loadSubscription()
     }
   }, [user])
+
+  // Handlers live inside the component so they can update
+  // its state.
+  async function updateSubscription(action) {
+    const token = localStorage.getItem("access_token")
+
+    setUpdating(true)
+    setSubscriptionError("")
+
+    try {
+      const data = await action(token)
+      setSubscription(data)
+    } catch (error) {
+      setSubscriptionError(error.message)
+    } finally {
+      setUpdating(false)
+    }
+  }
+
+  const isActive = subscription?.status === "active"
 
   return (
     <div className="min-h-screen bg-black px-6 py-24 text-white">
@@ -87,41 +75,61 @@ function Dashboard() {
         </p>
 
         <div className="mt-12 grid gap-6 md:grid-cols-3">
-        <div className="rounded-2xl border border-gray-800 p-6">
-  <p className="text-gray-500">Subscription</p>
+          <div className="rounded-2xl border border-gray-800 p-6">
+            <p className="text-gray-500">Subscription</p>
 
-  <h2 className="mt-3 text-2xl font-bold">
-    {subscriptionLoading
-      ? "Loading..."
-      : subscription?.status === "active"
-        ? "Active"
-        : "Not Active"}
-  </h2>
+            <h2 className="mt-3 text-2xl font-bold">
+              {subscriptionLoading
+                ? "Loading..."
+                : isActive
+                  ? "Active"
+                  : "Not Active"}
+            </h2>
 
-  {!subscriptionLoading && subscription?.status !== "active" && (
-    <button
-      onClick={handleSubscribe}
-      className="mt-6 rounded-xl bg-white px-5 py-3 font-semibold text-black hover:bg-gray-200"
-    >
-      Subscribe
-    </button>
-  )}
+            {subscription?.message && !subscriptionLoading && (
+              <p className="mt-2 text-sm text-gray-400">
+                {subscription.message}
+              </p>
+            )}
 
-  {!subscriptionLoading && subscription?.status === "active" && (
-    <button
-      onClick={handleCancelSubscription}
-      className="mt-6 rounded-xl border border-gray-700 px-5 py-3 font-semibold text-white hover:bg-gray-900"
-    >
-      Cancel Subscription
-    </button>
-  )}
-</div>
+            {!subscriptionLoading && !isActive && (
+              <button
+                onClick={() => updateSubscription(subscribeUser)}
+                disabled={updating}
+                className="mt-6 rounded-xl bg-white px-5 py-3 font-semibold text-black hover:bg-gray-200 disabled:opacity-50"
+              >
+                {updating ? "Subscribing..." : "Subscribe"}
+              </button>
+            )}
+
+            {!subscriptionLoading && isActive && (
+              <button
+                onClick={() => updateSubscription(cancelSubscription)}
+                disabled={updating}
+                className="mt-6 rounded-xl border border-gray-700 px-5 py-3 font-semibold text-white hover:bg-gray-900 disabled:opacity-50"
+              >
+                {updating ? "Canceling..." : "Cancel Subscription"}
+              </button>
+            )}
+
+            {subscriptionError && (
+              <p className="mt-4 text-sm text-red-400">
+                {subscriptionError}
+              </p>
+            )}
+          </div>
 
           <div className="rounded-2xl border border-gray-800 p-6">
             <p className="text-gray-500">Newsletter</p>
             <h2 className="mt-3 text-2xl font-bold">
               Weekly AI
             </h2>
+            <Link
+              to="/newsletters"
+              className="mt-6 inline-block text-sm font-medium text-gray-300 hover:text-white"
+            >
+              Read past issues →
+            </Link>
           </div>
 
           <div className="rounded-2xl border border-gray-800 p-6">
@@ -130,6 +138,21 @@ function Dashboard() {
               {user.is_email_verified ? "Verified" : "Not Verified"}
             </h2>
           </div>
+
+          {user.is_admin && (
+            <Link
+              to="/admin"
+              className="rounded-2xl border border-indigo-500/40 bg-indigo-500/5 p-6 transition hover:border-indigo-400 md:col-span-3"
+            >
+              <p className="text-indigo-300">Admin</p>
+              <h2 className="mt-3 text-2xl font-bold">
+                Newsroom →
+              </h2>
+              <p className="mt-2 text-sm text-gray-400">
+                Fetch news, generate and review drafts, publish to subscribers.
+              </p>
+            </Link>
+          )}
         </div>
       </div>
     </div>
