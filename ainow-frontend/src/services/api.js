@@ -159,6 +159,22 @@ export async function getNewsletter(
   return response.json()
 }
 
+export async function getNewsletterPreview(
+  newsletterId
+) {
+  const response = await fetch(
+    `${API_BASE_URL}/newsletters/${newsletterId}/preview`
+  )
+
+  if (!response.ok) {
+    throw new Error(
+      "Failed to fetch newsletter preview"
+    )
+  }
+
+  return response.json()
+}
+
 export async function resendVerification(email) {
   const response = await fetch(
     `${API_BASE_URL}/auth/resend-verification`,

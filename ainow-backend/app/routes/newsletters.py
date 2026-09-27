@@ -13,9 +13,53 @@ from app.schemas.newsletter import (
     NewsletterSectionResponse,
     NewsletterSummaryResponse,
 )
+from app.compose.persist import load_issue_content, mark_issue_covered
 from app.services.email.sender import (
     send_newsletter_to_subscribers,
 )
+
+
+def _summary(
+    issue: NewsletterIssue,
+) -> NewsletterSummaryResponse:
+    content = load_issue_content(issue)
+
+    cover = None
+
+    if content:
+        cards = (
+            ([content.deep_dive] if content.deep_dive else [])
+            + list(content.quick_news)
+            + ([content.paper_of_week] if content.paper_of_week else [])
+        )
+        cover = next((card.image_url for card in cards if card.image_url), None)
+
+    return NewsletterSummaryResponse(
+        id=issue.id,
+        title=issue.title,
+        status=issue.status,
+        created_at=issue.created_at,
+        published_at=issue.published_at,
+        headline=content.headline if content else None,
+        intro=content.intro if content else None,
+        cover_image=cover,
+    )
+
+
+def _detail(
+    issue: NewsletterIssue,
+) -> NewsletterDetailResponse:
+    content = load_issue_content(issue)
+
+    return NewsletterDetailResponse(
+        id=issue.id,
+        title=issue.title,
+        status=issue.status,
+        created_at=issue.created_at,
+        published_at=issue.published_at,
+        html_content=issue.html_content,
+        content=content.model_dump(mode="json") if content else None,
+    )
 
 
 router = APIRouter(
@@ -191,6 +235,10 @@ def publish_newsletter(
     db.commit()
     db.refresh(newsletter)
 
+    # Remember what this issue told readers so later issues
+    # don't repeat it.
+    stories_recorded = mark_issue_covered(db, newsletter)
+
     delivery_results = (
     send_newsletter_to_subscribers(
         db=db,
@@ -202,6 +250,7 @@ def publish_newsletter(
         "message": "Newsletter published successfully",
         "newsletter_id": newsletter.id,
         "published_at": newsletter.published_at,
+        "stories_recorded": stories_recorded,
         "delivery_summary": {
             "total": len(delivery_results),
             "sent": sum(
@@ -236,7 +285,30 @@ def get_newsletters(
         .all()
     )
 
-    return newsletters
+    return [_summary(issue) for issue in newsletters]
+
+
+# ---------------------------------------------------------
+# DRAFT PREVIEW (any status)
+# ---------------------------------------------------------
+
+@router.get(
+    "/{newsletter_id}/preview",
+    response_model=NewsletterDetailResponse,
+)
+def preview_newsletter(
+    newsletter_id: int,
+    db: Session = Depends(get_db),
+):
+    newsletter = db.get(NewsletterIssue, newsletter_id)
+
+    if not newsletter:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Newsletter not found",
+        )
+
+    return _detail(newsletter)
 
 
 # ---------------------------------------------------------
@@ -266,4 +338,4 @@ def get_newsletter(
             detail="Newsletter not found",
         )
 
-    return newsletter
+    return _detail(newsletter)

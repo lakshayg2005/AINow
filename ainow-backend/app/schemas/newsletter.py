@@ -37,6 +37,11 @@ class NewsletterSummaryResponse(BaseModel):
     created_at: datetime
     published_at: datetime | None
 
+    # v2 issues only
+    headline: str | None = None
+    intro: str | None = None
+    cover_image: str | None = None
+
 
 class NewsletterDetailResponse(BaseModel):
     id: int
@@ -44,7 +49,11 @@ class NewsletterDetailResponse(BaseModel):
     status: str
     created_at: datetime
     published_at: datetime | None
-    html_content: str
+    html_content: str | None = None
+
+    # Structured v2 content for the interactive web view;
+    # None for legacy issues (render html_content instead).
+    content: dict | None = None
 
 class QuickNewsItem(BaseModel):
     headline: str

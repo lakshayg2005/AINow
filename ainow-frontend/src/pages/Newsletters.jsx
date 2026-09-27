@@ -81,8 +81,28 @@ function Newsletters() {
             {newsletters.map((newsletter) => (
               <article
                 key={newsletter.id}
-                className="group rounded-2xl border border-gray-800 p-8 transition hover:border-gray-600"
+                className="group overflow-hidden rounded-2xl border border-gray-800 transition hover:border-gray-600"
               >
+
+                {newsletter.cover_image && (
+                  <Link
+                    to={`/newsletters/${newsletter.id}`}
+                    className="block aspect-[2/1] overflow-hidden bg-neutral-900"
+                  >
+                    <img
+                      src={newsletter.cover_image}
+                      alt=""
+                      loading="lazy"
+                      referrerPolicy="no-referrer"
+                      onError={(event) => {
+                        event.currentTarget.parentElement.style.display = "none"
+                      }}
+                      className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]"
+                    />
+                  </Link>
+                )}
+
+                <div className="p-8">
 
                 <div className="flex items-center justify-between gap-4">
                   <span className="text-sm text-gray-500">
@@ -106,12 +126,12 @@ function Newsletters() {
                 </div>
 
                 <h2 className="mt-8 text-2xl font-bold transition group-hover:text-gray-300">
-                  {newsletter.title}
+                  {newsletter.headline || newsletter.title}
                 </h2>
 
-                <p className="mt-4 leading-7 text-gray-400">
-                  A curated edition of the latest
-                  AI news, research, trends and tools.
+                <p className="mt-4 line-clamp-3 leading-7 text-gray-400">
+                  {newsletter.intro ||
+                    "A curated edition of the latest AI news, research, trends and tools."}
                 </p>
 
                 <Link
@@ -120,6 +140,8 @@ function Newsletters() {
                 >
                   Read Newsletter →
                 </Link>
+
+                </div>
 
               </article>
             ))}

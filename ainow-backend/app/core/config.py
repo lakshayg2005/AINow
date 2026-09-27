@@ -21,6 +21,9 @@ class Settings(BaseSettings):
 
     GITHUB_TOKEN: str | None = None
 
+    # Used for "read on the web" links in emails.
+    frontend_url: str = "http://localhost:5173"
+
     # Free LLM providers (OpenAI-compatible). Any that have a
     # key are tried in order; see app/core/free_llm.py.
     groq_api_key: str | None = None

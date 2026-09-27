@@ -15,6 +15,7 @@ Promotional items (customer case studies, ads) are halved.
 from __future__ import annotations
 
 import math
+import re
 from datetime import datetime, timedelta
 
 from app.db.models import RawItem, Story
@@ -65,6 +66,54 @@ _IMAGE_PRIORITY = {
     "repo": 3,
     "discussion": 4,
 }
+
+
+_ICON_HINT = re.compile(
+    r"(favicon|apple-touch|/logo|[-_]logo|/icon|[-_]icon|avatar)",
+    re.IGNORECASE,
+)
+
+# "...-80-80.png", "..._64x64.jpg"
+_SMALL_DIMENSIONS = re.compile(
+    r"(\d{2,4})[-_x](\d{2,4})\.(?:png|jpe?g|webp|gif)",
+    re.IGNORECASE,
+)
+
+
+def looks_like_icon(
+    url: str,
+) -> bool:
+    """
+    og:image is sometimes a site logo or a tiny icon, which
+    would look broken as a card hero image.
+    """
+
+    if _ICON_HINT.search(url):
+        return True
+
+    match = _SMALL_DIMENSIONS.search(url)
+
+    return bool(
+        match and int(match.group(1)) < 200 and int(match.group(2)) < 200
+    )
+
+
+def is_official_repo(
+    item: RawItem,
+    story_title: str,
+) -> bool:
+    """
+    For repos/models/spaces: is the owner the maker named in
+    the story ("Qwen/Qwen-Image-2.1" for "Qwen Image 2.1"),
+    rather than a fine-tune or re-upload?
+    """
+
+    if item.kind not in ("repo", "model", "space") or "/" not in item.title:
+        return False
+
+    owner = item.title.split("/", 1)[0].lower()
+
+    return owner in story_title.lower()
 
 
 def _item_time(
@@ -146,15 +195,21 @@ def aggregate_story(
         ),
     )
 
+    story.title = title_item.title[:1000]
+
     image_items = sorted(
-        (item for item in items if item.image_url),
+        (
+            item
+            for item in items
+            if item.image_url and not looks_like_icon(item.image_url)
+        ),
         key=lambda item: (
             _IMAGE_PRIORITY.get(item.kind, 5),
+            0 if is_official_repo(item, story.title) else 1,
             item.trust_tier,
         ),
     )
 
-    story.title = title_item.title[:1000]
     story.image_url = image_items[0].image_url if image_items else None
     story.item_count = len(items)
     story.source_count = len(sources)
