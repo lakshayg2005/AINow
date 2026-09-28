@@ -5,8 +5,6 @@ import Navbar from "./components/Navbar";
 import Home from "./pages/Home";
 import About from "./pages/About";
 import Newsletters from "./pages/Newsletters";
-import Contact from "./pages/Contact";
-// import Feedback from "./pages/Feedback"
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Dashboard from "./pages/Dashboard";
@@ -14,6 +12,7 @@ import NewsletterDetail from "./pages/NewsletterDetails";
 import VerifyEmail from "./pages/VerifyEmail";
 import Admin from "./pages/Admin";
 import Unsubscribe from "./pages/Unsubscribe";
+import NotFound from "./pages/NotFound";
 import ProtectedRoute from "./components/ProtectedRoute";
 
 
@@ -29,13 +28,15 @@ function App() {
 
         <Route path="/newsletters" element={<Newsletters />} />
 
-        <Route path="/contact" element={<Contact />} />
-
-        {/* <Route path="/feedback" element={<Feedback />} /> */}
+        <Route path="/newsletters/:id" element={<NewsletterDetail />} />
 
         <Route path="/login" element={<Login />} />
 
         <Route path="/register" element={<Register />} />
+
+        <Route path="/verify-email" element={<VerifyEmail />} />
+
+        <Route path="/unsubscribe" element={<Unsubscribe />} />
 
         <Route
           path="/dashboard"
@@ -46,12 +47,6 @@ function App() {
           }
         />
 
-        {/* <Route path="/newsletter-details" element={<NewsletterDetails />} /> */}
-
-        <Route path="/verify-email" element={<VerifyEmail />} />
-
-        <Route path="/unsubscribe" element={<Unsubscribe />} />
-
         <Route
           path="/admin"
           element={
@@ -61,10 +56,7 @@ function App() {
           }
         />
 
-        <Route
-  path="/newsletters/:id"
-  element={<NewsletterDetail />}
-/>
+        <Route path="*" element={<NotFound />} />
       </Routes>
     </BrowserRouter>
   );

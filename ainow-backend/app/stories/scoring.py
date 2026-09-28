@@ -116,6 +116,32 @@ def is_official_repo(
     return owner in story_title.lower()
 
 
+def image_candidates(
+    items: list[RawItem],
+    story_title: str,
+) -> list[str]:
+    """
+    The story's usable images, best first: articles before
+    papers and repos, the maker's own repo before re-uploads,
+    trusted sources first.
+    """
+
+    ranked = sorted(
+        (
+            item
+            for item in items
+            if item.image_url and not looks_like_icon(item.image_url)
+        ),
+        key=lambda item: (
+            _IMAGE_PRIORITY.get(item.kind, 5),
+            0 if is_official_repo(item, story_title) else 1,
+            item.trust_tier,
+        ),
+    )
+
+    return list(dict.fromkeys(item.image_url for item in ranked))
+
+
 def _item_time(
     item: RawItem,
 ) -> datetime:
@@ -197,20 +223,9 @@ def aggregate_story(
 
     story.title = title_item.title[:1000]
 
-    image_items = sorted(
-        (
-            item
-            for item in items
-            if item.image_url and not looks_like_icon(item.image_url)
-        ),
-        key=lambda item: (
-            _IMAGE_PRIORITY.get(item.kind, 5),
-            0 if is_official_repo(item, story.title) else 1,
-            item.trust_tier,
-        ),
-    )
+    images = image_candidates(items, story.title)
 
-    story.image_url = image_items[0].image_url if image_items else None
+    story.image_url = images[0] if images else None
     story.item_count = len(items)
     story.source_count = len(sources)
     story.signals = signals

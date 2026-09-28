@@ -2,7 +2,7 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from app.compose.persist import mark_issue_covered
+from app.compose.persist import load_issue_content, mark_issue_covered
 from app.db.models import NewsletterIssue, NewsletterSection
 
 
@@ -23,6 +23,11 @@ def publish_issue(
 
     if issue.status == "published":
         raise PublishError("Newsletter is already published")
+
+    # Old-format drafts can't record their stories as covered,
+    # so later issues would repeat them.
+    if load_issue_content(issue) is None:
+        raise PublishError("Old-format drafts can't be published; generate a new draft")
 
     if not issue.html_content:
         raise PublishError("Final HTML has not been generated yet")

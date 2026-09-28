@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Link, Navigate } from "react-router-dom"
-import { useAuth } from "../context/AuthContext"
+import { useAuth } from "../context/auth"
 import {
   deleteDraft,
   getAdminIssues,
   getAdminOverview,
   publishIssue,
+  recheckIssue,
   retryFailedDeliveries,
   sendTestEmail,
   startComposeJob,
@@ -71,6 +72,102 @@ function jobSummary(job) {
     return `${result.sent} sent · ${result.failed} failed · ${result.skipped} skipped`
   }
   return ""
+}
+
+const SECTION_LABELS = {
+  headline: "Headline",
+  intro: "Intro",
+  quick_news: "Quick News",
+  research_spotlight: "Research",
+  paper_of_week: "Paper of the Week",
+  deep_dive: "Deep Dive",
+  trends: "Trends",
+  concept: "Concept",
+  resources: "Resources",
+  our_take: "Our Take",
+  images: "Images",
+  accuracy: "Accuracy",
+  general: "General",
+}
+
+function reviewFixes(review) {
+  if (!review) return 0
+  return [...review.notes, ...review.checks].filter((note) => note.severity === "fix").length
+}
+
+function ScoreBadge({ review }) {
+  if (!review) return null
+
+  if (review.score == null) {
+    return <span className="rounded-full bg-neutral-700/40 px-2.5 py-0.5 text-xs font-semibold text-neutral-300">Checks only</span>
+  }
+
+  const tone =
+    review.score >= 8
+      ? "bg-emerald-500/15 text-emerald-300"
+      : review.score >= 6
+        ? "bg-amber-500/15 text-amber-300"
+        : "bg-rose-500/15 text-rose-300"
+
+  return <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${tone}`}>Review {review.score}/10</span>
+}
+
+function ReviewNotes({ title, notes }) {
+  if (notes.length === 0) return null
+
+  // Fixes first.
+  const ordered = [...notes].sort((a, b) => (a.severity === "fix" ? 0 : 1) - (b.severity === "fix" ? 0 : 1))
+
+  return (
+    <div>
+      <p className="text-xs font-bold uppercase tracking-wider text-neutral-500">{title}</p>
+      <ul className="mt-2 flex flex-col gap-2">
+        {ordered.map((note, index) => (
+          <li key={index} className="flex gap-3 text-sm">
+            <span
+              className={`mt-0.5 h-fit shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${
+                note.severity === "fix" ? "bg-rose-500/15 text-rose-300" : "bg-neutral-700/50 text-neutral-400"
+              }`}
+            >
+              {note.severity}
+            </span>
+            <span className="text-neutral-300">
+              <span className="font-semibold text-neutral-100">{SECTION_LABELS[note.section] || note.section}</span>
+              {note.item && <span className="text-neutral-500"> · {note.item}</span>}
+              <span className="block text-neutral-400">{note.note}</span>
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function ReviewPanel({ review }) {
+  if (!review) return null
+
+  const fixes = reviewFixes(review)
+  const total = review.notes.length + review.checks.length
+
+  return (
+    <details className="group mt-3 rounded-xl border border-neutral-800 bg-black/40">
+      <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-2.5 text-sm text-neutral-400 hover:text-neutral-200">
+        <span className="transition group-open:rotate-90">›</span>
+        {total === 0 ? "Review found nothing to change" : `${total} review note${total === 1 ? "" : "s"}`}
+        {fixes > 0 && <span className="text-rose-300">· {fixes} to fix</span>}
+        {review.verdict && <span className="hidden truncate text-neutral-500 md:inline">· {review.verdict}</span>}
+      </summary>
+      <div className="flex flex-col gap-5 border-t border-neutral-800 px-4 py-4">
+        {review.verdict && <p className="text-sm text-neutral-300">{review.verdict}</p>}
+        <ReviewNotes title="Editor's notes" notes={review.notes} />
+        <ReviewNotes title="Automatic checks" notes={review.checks} />
+        <p className="text-xs text-neutral-600">
+          {review.model ? `Reviewed by ${review.model}` : "No model review"}
+          {review.reviewed_at && ` · ${timeAgo(review.reviewed_at)}`}
+        </p>
+      </div>
+    </details>
+  )
 }
 
 function StatCard({ label, value, detail }) {
@@ -273,76 +370,100 @@ function Admin() {
               const failed = issue.deliveries?.failed || 0
 
               return (
-                <article key={issue.id} className="flex flex-col gap-4 py-5 md:flex-row md:items-center md:justify-between">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-500">
-                      <Pill status={issue.status} />
-                      <span>#{issue.id}</span>
-                      <span>· created {timeAgo(issue.created_at)}</span>
-                      {issue.format === 1 && <span>· legacy format</span>}
-                      {issue.stories != null && <span>· {issue.stories} stories · {issue.sources} sources</span>}
-                      {issue.models?.length > 0 && <span>· {issue.models.join(", ")}</span>}
+                <article key={issue.id} className="py-5">
+                  <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-500">
+                        <Pill status={issue.status} />
+                        <ScoreBadge review={issue.review} />
+                        <span>#{issue.id}</span>
+                        <span>· created {timeAgo(issue.created_at)}</span>
+                        {issue.format === 1 && <span>· legacy format</span>}
+                        {issue.stories != null && <span>· {issue.stories} stories · {issue.sources} sources</span>}
+                        {issue.models?.length > 0 && <span>· {issue.models.join(", ")}</span>}
+                      </div>
+                      <h3 className="mt-2 truncate text-lg font-semibold">{issue.headline || issue.title}</h3>
+                      {issue.status === "published" && (
+                        <p className="mt-1 text-sm text-neutral-400">
+                          Delivered to {sent} {failed > 0 && <span className="text-rose-300">· {failed} failed</span>}
+                        </p>
+                      )}
                     </div>
-                    <h3 className="mt-2 truncate text-lg font-semibold">{issue.headline || issue.title}</h3>
-                    {issue.status === "published" && (
-                      <p className="mt-1 text-sm text-neutral-400">
-                        Delivered to {sent} {failed > 0 && <span className="text-rose-300">· {failed} failed</span>}
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="flex shrink-0 flex-wrap gap-2 text-sm">
-                    <Link
-                      to={issue.status === "published" ? `/newsletters/${issue.id}` : `/newsletters/${issue.id}?preview=1`}
-                      className="rounded-lg border border-neutral-700 px-3 py-1.5 hover:border-neutral-500"
-                    >
-                      {issue.status === "published" ? "View" : "Preview"}
-                    </Link>
-
-                    <button
-                      type="button"
-                      disabled={busy[`test-${issue.id}`]}
-                      onClick={() => run(`test-${issue.id}`, () => sendTestEmail(issue.id), (result) => result.message)}
-                      className="rounded-lg border border-neutral-700 px-3 py-1.5 hover:border-neutral-500 disabled:opacity-50"
-                    >
-                      {busy[`test-${issue.id}`] ? "Sending…" : "Send test to me"}
-                    </button>
-
-                    {issue.status === "draft" && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => setConfirming(issue)}
-                          className="rounded-lg bg-white px-3 py-1.5 font-semibold text-black hover:bg-neutral-200"
-                        >
-                          Publish…
-                        </button>
-                        <button
-                          type="button"
-                          disabled={busy[`delete-${issue.id}`]}
-                          onClick={() => {
-                            if (window.confirm(`Delete draft #${issue.id}? This cannot be undone.`)) {
-                              run(`delete-${issue.id}`, () => deleteDraft(issue.id), `Draft #${issue.id} deleted`)
-                            }
-                          }}
-                          className="rounded-lg px-3 py-1.5 text-rose-300 hover:bg-rose-500/10 disabled:opacity-50"
-                        >
-                          Delete
-                        </button>
-                      </>
-                    )}
-
-                    {issue.status === "published" && failed > 0 && (
+  
+                    <div className="flex shrink-0 flex-wrap gap-2 text-sm">
+                      <Link
+                        to={issue.status === "published" ? `/newsletters/${issue.id}` : `/newsletters/${issue.id}?preview=1`}
+                        className="rounded-lg border border-neutral-700 px-3 py-1.5 hover:border-neutral-500"
+                      >
+                        {issue.status === "published" ? "View" : "Preview"}
+                      </Link>
+  
                       <button
                         type="button"
-                        disabled={busy[`retry-${issue.id}`] || activeKinds.has("deliver")}
-                        onClick={() => run(`retry-${issue.id}`, () => retryFailedDeliveries(issue.id), "Retrying failed deliveries")}
-                        className="rounded-lg border border-rose-500/40 px-3 py-1.5 text-rose-300 hover:bg-rose-500/10 disabled:opacity-50"
+                        disabled={busy[`test-${issue.id}`]}
+                        onClick={() => run(`test-${issue.id}`, () => sendTestEmail(issue.id), (result) => result.message)}
+                        className="rounded-lg border border-neutral-700 px-3 py-1.5 hover:border-neutral-500 disabled:opacity-50"
                       >
-                        Retry {failed} failed
+                        {busy[`test-${issue.id}`] ? "Sending…" : "Send test to me"}
                       </button>
-                    )}
+  
+                      {issue.status === "draft" && issue.format === 2 && (
+                        <button
+                          type="button"
+                          disabled={busy[`recheck-${issue.id}`]}
+                          onClick={() =>
+                            run(`recheck-${issue.id}`, () => recheckIssue(issue.id), (result) => {
+                              const score = result.review.score != null ? `score ${result.review.score}/10` : "checks only"
+                              return `Re-checked #${issue.id}: ${score} · ${result.images_replaced} image${result.images_replaced === 1 ? "" : "s"} replaced`
+                            })
+                          }
+                          title="Re-check images and review the draft again"
+                          className="rounded-lg border border-neutral-700 px-3 py-1.5 hover:border-neutral-500 disabled:opacity-50"
+                        >
+                          {busy[`recheck-${issue.id}`] ? "Checking…" : "Re-check"}
+                        </button>
+                      )}
+  
+                      {issue.status === "draft" && (
+                        <>
+                          {/* Old-format drafts can't be published (see publishing.py). */}
+                          {issue.format === 2 && (
+                            <button
+                              type="button"
+                              onClick={() => setConfirming(issue)}
+                              className="rounded-lg bg-white px-3 py-1.5 font-semibold text-black hover:bg-neutral-200"
+                            >
+                              Publish…
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            disabled={busy[`delete-${issue.id}`]}
+                            onClick={() => {
+                              if (window.confirm(`Delete draft #${issue.id}? This cannot be undone.`)) {
+                                run(`delete-${issue.id}`, () => deleteDraft(issue.id), `Draft #${issue.id} deleted`)
+                              }
+                            }}
+                            className="rounded-lg px-3 py-1.5 text-rose-300 hover:bg-rose-500/10 disabled:opacity-50"
+                          >
+                            Delete
+                          </button>
+                        </>
+                      )}
+  
+                      {issue.status === "published" && failed > 0 && (
+                        <button
+                          type="button"
+                          disabled={busy[`retry-${issue.id}`] || activeKinds.has("deliver")}
+                          onClick={() => run(`retry-${issue.id}`, () => retryFailedDeliveries(issue.id), "Retrying failed deliveries")}
+                          className="rounded-lg border border-rose-500/40 px-3 py-1.5 text-rose-300 hover:bg-rose-500/10 disabled:opacity-50"
+                        >
+                          Retry {failed} failed
+                        </button>
+                      )}
+                    </div>
                   </div>
+                  <ReviewPanel review={issue.review} />
                 </article>
               )
             })}
@@ -362,6 +483,12 @@ function Admin() {
               <strong className="text-white">{overview?.subscribers ?? 0} subscribers</strong>. Its stories are then
               marked as covered so future issues won't repeat them. This can't be undone.
             </p>
+            {reviewFixes(confirming.review) > 0 && (
+              <p className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">
+                The review flagged {reviewFixes(confirming.review)} thing{reviewFixes(confirming.review) === 1 ? "" : "s"} to fix.
+                Check the notes before sending.
+              </p>
+            )}
             <div className="mt-6 flex justify-end gap-3">
               <button type="button" onClick={() => setConfirming(null)} className="rounded-lg px-4 py-2 text-sm text-neutral-300 hover:text-white">
                 Cancel

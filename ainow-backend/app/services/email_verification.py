@@ -5,6 +5,7 @@ import secrets
 
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.db.models import EmailVerification, User
 from app.services.email.smtp_provider import SMTPEmailProvider
 
@@ -64,9 +65,8 @@ def send_verification_email(
 ):
     provider = SMTPEmailProvider()
 
-    # React frontend route we'll create later.
     verification_url = (
-        "http://localhost:5173/verify-email"
+        f"{settings.frontend_url.rstrip('/')}/verify-email"
         f"?token={token}"
     )
 

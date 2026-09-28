@@ -11,7 +11,6 @@ from app.routes.admin import router as admin_router
 from app.routes.auth import router as auth_router
 from app.routes.subscriptions import router as subscription_router
 from app.routes.newsletters import router as newsletter_router
-from app.routes.content import router as content_router
 
 
 ensure_schema(engine)
@@ -57,7 +56,6 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(subscription_router)
 app.include_router(newsletter_router)
-app.include_router(content_router)
 app.include_router(admin_router)
 
 @app.get("/")

@@ -1,34 +1,56 @@
-import { createContext, useContext, useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { getCurrentUser } from "../services/api"
+import { AuthContext } from "./auth"
 
-const AuthContext = createContext(null)
+function hasToken() {
+  return Boolean(localStorage.getItem("access_token"))
+}
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
-  const [loading, setLoading] = useState(true)
+  // Without a stored token there is nothing to load.
+  const [loading, setLoading] = useState(hasToken)
 
-  async function loadUser() {
+  const fetchUser = useCallback(() => {
     const token = localStorage.getItem("access_token")
 
     if (!token) {
       setUser(null)
       setLoading(false)
-      return
+      return Promise.resolve()
     }
 
-    try {
-      const currentUser = await getCurrentUser(token)
-      setUser(currentUser)
-    } catch {
-      localStorage.removeItem("access_token")
-      setUser(null)
-    } finally {
-      setLoading(false)
-    }
-  }
+    return getCurrentUser(token)
+      .then(setUser)
+      .catch(() => {
+        localStorage.removeItem("access_token")
+        setUser(null)
+      })
+      .finally(() => setLoading(false))
+  }, [])
 
   useEffect(() => {
-    loadUser()
+    if (!hasToken()) return
+
+    let cancelled = false
+
+    getCurrentUser(localStorage.getItem("access_token"))
+      .then((currentUser) => {
+        if (!cancelled) setUser(currentUser)
+      })
+      .catch(() => {
+        if (!cancelled) {
+          localStorage.removeItem("access_token")
+          setUser(null)
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   function logout() {
@@ -43,14 +65,10 @@ export function AuthProvider({ children }) {
         loading,
         isAuthenticated: !!user,
         logout,
-        refreshUser: loadUser,
+        refreshUser: fetchUser,
       }}
     >
       {children}
     </AuthContext.Provider>
   )
-}
-
-export function useAuth() {
-  return useContext(AuthContext)
 }

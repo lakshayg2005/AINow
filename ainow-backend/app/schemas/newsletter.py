@@ -3,33 +3,6 @@ from datetime import datetime
 from pydantic import BaseModel,Field
 
 
-class NewsletterCreateRequest(BaseModel):
-    title: str
-
-
-class NewsletterSectionCreateRequest(BaseModel):
-    section_type: str
-    title: str
-    content: str
-    display_order: int
-
-
-class NewsletterCreateResponse(BaseModel):
-    id: int
-    title: str
-    status: str
-    created_at: datetime
-
-
-class NewsletterSectionResponse(BaseModel):
-    id: int
-    newsletter_issue_id: int
-    section_type: str
-    title: str
-    content: str
-    display_order: int
-
-
 class NewsletterSummaryResponse(BaseModel):
     id: int
     title: str
@@ -54,6 +27,22 @@ class NewsletterDetailResponse(BaseModel):
     # Structured v2 content for the interactive web view;
     # None for legacy issues (render html_content instead).
     content: dict | None = None
+
+
+class ArchiveMatch(BaseModel):
+    headline: str
+    section: str
+    summary: str | None = None
+
+
+class ArchiveSearchResult(BaseModel):
+    id: int
+    title: str
+    published_at: datetime | None
+    headline: str | None = None
+    cover_image: str | None = None
+    matches: list[ArchiveMatch]
+
 
 class QuickNewsItem(BaseModel):
     headline: str

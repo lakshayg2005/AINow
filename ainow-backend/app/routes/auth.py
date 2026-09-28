@@ -102,17 +102,10 @@ def verify_email(
     token: str,
     db: Session = Depends(get_db),
 ):
-    print("\n========== EMAIL VERIFICATION ==========")
-    print("Received token:", repr(token))
-
-    token_hash = hash_token(token)
-
-    print("Calculated hash:", token_hash)
-
     verification = (
         db.query(EmailVerification)
         .filter(
-            EmailVerification.token_hash == token_hash
+            EmailVerification.token_hash == hash_token(token)
         )
         .order_by(
             EmailVerification.id.desc()
@@ -121,32 +114,10 @@ def verify_email(
     )
 
     if not verification:
-        print("RESULT: TOKEN NOT FOUND")
-
         raise HTTPException(
             status_code=400,
             detail="Invalid verification token.",
         )
-
-    print(
-        "Verification ID:",
-        verification.id,
-    )
-
-    print(
-        "User ID:",
-        verification.user_id,
-    )
-
-    print(
-        "Expires:",
-        verification.expires_at,
-    )
-
-    print(
-        "Verified At:",
-        verification.verified_at,
-    )
 
     user = (
         db.query(User)
@@ -162,22 +133,10 @@ def verify_email(
             detail="User not found.",
         )
 
-    print(
-        "User email:",
-        user.email,
-    )
-
-    print(
-        "User verified:",
-        user.is_email_verified,
-    )
-
+    # Opening the link twice (or a mail scanner opening it
+    # first) is not an error once the account is verified.
     if verification.verified_at:
         if user.is_email_verified:
-            print(
-                "RESULT: ALREADY VERIFIED"
-            )
-
             return {
                 "message": "Email is already verified.",
                 "email": user.email,
@@ -191,8 +150,6 @@ def verify_email(
     now = datetime.utcnow()
 
     if verification.expires_at < now:
-        print("RESULT: TOKEN EXPIRED")
-
         raise HTTPException(
             status_code=400,
             detail="Verification token has expired.",
@@ -203,14 +160,11 @@ def verify_email(
 
     db.commit()
 
-    print(
-        "RESULT: VERIFICATION SUCCESS"
-    )
-
     return {
         "message": "Email verified successfully.",
         "email": user.email,
     }
+
 
 @router.post(
     "/login",

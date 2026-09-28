@@ -1,4 +1,5 @@
-const API_BASE_URL = "http://127.0.0.1:8000"
+// Set VITE_API_URL in .env for a deployed backend.
+const API_BASE_URL = (import.meta.env.VITE_API_URL || "http://127.0.0.1:8000").replace(/\/$/, "")
 
 export async function registerUser(userData) {
   const response = await fetch(`${API_BASE_URL}/auth/register`, {
@@ -55,14 +56,18 @@ export async function getCurrentUser(token) {
   return data
 }
 
-export async function checkBackend() {
-  const response = await fetch("http://127.0.0.1:8000/health")
+export async function verifyEmail(token) {
+  const response = await fetch(
+    `${API_BASE_URL}/auth/verify-email?token=${encodeURIComponent(token)}`
+  )
+
+  const data = await response.json().catch(() => ({}))
 
   if (!response.ok) {
-    throw new Error("Backend is unavailable")
+    throw new Error(data.detail || "Email verification failed.")
   }
 
-  return response.json()
+  return data
 }
 
 export async function getSubscription(token) {
@@ -128,9 +133,9 @@ export async function cancelSubscription(token) {
 }
 
 
-export async function getNewsletters() {
+export async function getNewsletters({ limit } = {}) {
   const response = await fetch(
-    `${API_BASE_URL}/newsletters`
+    `${API_BASE_URL}/newsletters${limit ? `?limit=${limit}` : ""}`
   )
 
   if (!response.ok) {
@@ -154,6 +159,19 @@ export async function getNewsletter(
     throw new Error(
       "Failed to fetch newsletter"
     )
+  }
+
+  return response.json()
+}
+
+export async function searchNewsletters(query, { signal } = {}) {
+  const response = await fetch(
+    `${API_BASE_URL}/newsletters/search?q=${encodeURIComponent(query)}`,
+    { signal }
+  )
+
+  if (!response.ok) {
+    throw new Error("Search failed")
   }
 
   return response.json()
@@ -238,10 +256,6 @@ export function startComposeJob(days = 7) {
   return authRequest("/admin/jobs/compose", { method: "POST", body: { days } })
 }
 
-export function getJob(jobId) {
-  return authRequest(`/admin/jobs/${jobId}`)
-}
-
 export function sendTestEmail(issueId, email) {
   return authRequest(`/admin/issues/${issueId}/test-send`, {
     method: "POST",
@@ -257,8 +271,9 @@ export function retryFailedDeliveries(issueId) {
   return authRequest(`/admin/issues/${issueId}/retry-failed`, { method: "POST" })
 }
 
-export function getDeliveries(issueId) {
-  return authRequest(`/admin/issues/${issueId}/deliveries`)
+// Re-checks a draft's images and runs the quality review again.
+export function recheckIssue(issueId) {
+  return authRequest(`/admin/issues/${issueId}/recheck`, { method: "POST" })
 }
 
 export function deleteDraft(issueId) {
