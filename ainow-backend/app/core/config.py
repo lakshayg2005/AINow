@@ -13,6 +13,12 @@ class Settings(BaseSettings):
     hf_token: str
     hf_model_id: str = "Qwen/Qwen3-8B"
 
+    # "local" runs the embedding model in this process (needs
+    # ~500MB+ free; fine locally, too much for some free hosts).
+    # "hf" calls the same model via HF's free Inference API
+    # instead — same vectors, no local memory cost.
+    embeddings_provider: str = "local"
+
     # Only required if BREVO_API_KEY is unset (see get_email_provider).
     smtp_host: str = "smtp.gmail.com"
     smtp_port: int = 465
