@@ -1,0 +1,71 @@
+name: AINow pipeline
+
+# Free-tier hosts sleep the backend when idle, so the built-in
+# scheduler (app/scheduler.py, SCHEDULER_ENABLED) stays off in
+# production; this workflow triggers the same jobs over HTTP
+# instead; a request wakes a sleeping instance on its own.
+#
+# Needs two repo secrets (Settings -> Secrets and variables ->
+# Actions):
+#   API_URL     the deployed backend, e.g. https://ainow-backend.onrender.com
+#   ADMIN_TOKEN from: python -m app.admin create-token you@example.com
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"  # ingest: every 6 hours
+    - cron: "0 6 * * 0"    # compose: Sundays 06:00 UTC
+  workflow_dispatch:
+    inputs:
+      job:
+        description: Job to run
+        type: choice
+        options: [ingest, compose]
+        default: ingest
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pick the job for this trigger
+        id: which
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            job="${{ inputs.job }}"
+          elif [ "${{ github.event.schedule }}" = "0 6 * * 0" ]; then
+            job="compose"
+          else
+            job="ingest"
+          fi
+          echo "job=$job" >> "$GITHUB_OUTPUT"
+
+      - name: Start the job
+        id: start
+        run: |
+          body="{}"
+          if [ "${{ steps.which.outputs.job }}" = "compose" ]; then body='{"days":7}'; fi
+
+          response=$(curl -sf --retry 5 --retry-delay 15 --retry-all-errors \
+            -X POST "${{ secrets.API_URL }}/admin/jobs/${{ steps.which.outputs.job }}" \
+            -H "Authorization: Bearer ${{ secrets.ADMIN_TOKEN }}" \
+            -H "Content-Type: application/json" -d "$body")
+
+          echo "$response"
+          echo "job_id=$(echo "$response" | jq -r .id)" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for it to finish
+        run: |
+          for _ in $(seq 1 60); do
+            status=$(curl -sf "${{ secrets.API_URL }}/admin/jobs/${{ steps.start.outputs.job_id }}" \
+              -H "Authorization: Bearer ${{ secrets.ADMIN_TOKEN }}" | jq -r .status)
+            echo "status: $status"
+
+            case "$status" in
+              completed) exit 0 ;;
+              failed) exit 1 ;;
+            esac
+
+            sleep 30
+          done
+
+          echo "Timed out waiting for the job to finish."
+          exit 1

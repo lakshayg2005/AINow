@@ -26,6 +26,12 @@ PATCHES = (
 def ensure_schema(
     engine: Engine,
 ) -> None:
+    # Story/chunk embeddings use the `vector` column type, so the
+    # extension must exist before create_all runs (needed once on
+    # a fresh database, e.g. a new Neon/Supabase project).
+    with engine.begin() as connection:
+        connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+
     Base.metadata.create_all(bind=engine)
 
     with engine.begin() as connection:

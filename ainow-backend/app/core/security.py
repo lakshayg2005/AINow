@@ -45,6 +45,35 @@ def create_access_token(user_id: int) -> str:
     )
 
 
+def create_service_token(
+    user_id: int,
+    days: int = 400,
+) -> str:
+    """
+    A long-lived token for server-to-server calls (e.g. a
+    scheduled workflow triggering /admin/jobs/*), rather than a
+    human session. Same shape as create_access_token — get_
+    current_user accepts it and get_current_admin still checks
+    is_admin on every request — just with a longer expiry.
+
+    To revoke one, remove admin rights from the account or
+    rotate JWT_SECRET_KEY (which invalidates every token).
+    """
+
+    expire = datetime.now(timezone.utc) + timedelta(days=days)
+
+    payload = {
+        "sub": str(user_id),
+        "exp": expire,
+    }
+
+    return jwt.encode(
+        payload,
+        settings.jwt_secret_key,
+        algorithm=settings.jwt_algorithm,
+    )
+
+
 def decode_access_token(token: str) -> dict:
     try:
         return jwt.decode(

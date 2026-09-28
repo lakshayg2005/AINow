@@ -1,0 +1,3 @@
+# React Router handles routing client-side; without this,
+# a direct visit or refresh on e.g. /newsletters/12 404s.
+/*  /index.html  200

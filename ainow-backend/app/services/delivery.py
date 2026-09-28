@@ -21,9 +21,8 @@ from app.compose.persist import load_issue_content, web_url_for
 from app.core.config import settings
 from app.core.security import create_unsubscribe_token
 from app.db.models import NewsletterDelivery, NewsletterIssue, User
-from app.services.email.provider import EmailProvider
+from app.services.email.provider import EmailProvider, get_email_provider
 from app.services.email.sender import get_eligible_recipients
-from app.services.email.smtp_provider import SMTPEmailProvider
 from app.services.issue_email import render_issue_email, render_issue_text
 
 
@@ -146,7 +145,7 @@ def deliver_issue(
     if issue.status != "published":
         raise ValueError("Only published issues can be delivered")
 
-    provider = provider or SMTPEmailProvider()
+    provider = provider or get_email_provider()
     recipients = [user for user, _ in get_eligible_recipients(db)]
 
     summary = {"total": len(recipients), "sent": 0, "failed": 0, "skipped": 0}
@@ -209,7 +208,7 @@ def send_test_email(
     email = build_email(issue, user)
     target = recipient_email or user.email
 
-    (provider or SMTPEmailProvider()).send(
+    (provider or get_email_provider()).send(
         recipient_email=target,
         subject=f"[TEST] {email.subject}",
         html_content=email.html,

@@ -13,6 +13,7 @@ from fastapi import HTTPException
 from app.core.dependencies import get_current_admin
 from app.core.security import (
     create_access_token,
+    create_service_token,
     create_unsubscribe_token,
     decode_access_token,
     decode_unsubscribe_token,
@@ -21,7 +22,8 @@ from app.db.models import NewsletterIssue, User
 from app.scheduler import compose_due, ingest_due, last_compose_slot
 from app.schemas.issue import IssueContent, QuickNewsCard, SourceRef
 from app.services.delivery import build_email, unsubscribe_urls
-from app.services.email.provider import EmailProvider
+from app.services.email.provider import EmailProvider, get_email_provider
+from app.services.email.smtp_provider import SMTPEmailProvider
 from app.services.issue_email import render_issue_text
 
 
@@ -79,6 +81,18 @@ def test_tampered_token_rejected():
         decode_unsubscribe_token(token[:-2] + ("aa" if token[-2:] != "aa" else "bb"))
 
 
+def test_service_token_is_long_lived_and_not_purpose_scoped():
+    # Same shape as a login token (so get_current_user accepts
+    # it), just with a expiry far beyond a session's.
+    payload = decode_access_token(create_service_token(42, days=400))
+
+    assert payload["sub"] == "42"
+    assert "purpose" not in payload
+
+    lifetime_days = (payload["exp"] - datetime.now().timestamp()) / 86400
+    assert 395 < lifetime_days < 401
+
+
 # ============================================================
 # Admin access
 # ============================================================
@@ -131,6 +145,46 @@ def test_render_issue_text_sections():
     assert text.startswith("AINow — September 27, 2026")
     assert "QUICK NEWS" in text
     assert "[1] Launch — https://lab.example/post" in text
+
+
+def test_get_email_provider_prefers_brevo_when_configured(monkeypatch):
+    from app.core.config import settings
+    from app.services.email.brevo_provider import BrevoEmailProvider
+
+    monkeypatch.setattr(settings, "brevo_api_key", "key-123")
+    assert isinstance(get_email_provider(), BrevoEmailProvider)
+
+    monkeypatch.setattr(settings, "brevo_api_key", None)
+    assert isinstance(get_email_provider(), SMTPEmailProvider)
+
+
+def test_brevo_provider_parses_sender_and_raises_on_error(monkeypatch):
+    import httpx
+
+    from app.core.config import settings
+    from app.services.email.brevo_provider import BrevoEmailProvider
+
+    monkeypatch.setattr(settings, "email_from", "AINow <news@example.com>")
+    monkeypatch.setattr(settings, "brevo_api_key", "key-123")
+
+    provider = BrevoEmailProvider()
+    assert provider._sender == {"email": "news@example.com", "name": "AINow"}
+
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(400, json={"message": "invalid sender"})
+
+    real_client = httpx.Client
+
+    with pytest.MonkeyPatch.context() as patcher:
+        patcher.setattr(httpx, "Client", lambda **kw: real_client(transport=httpx.MockTransport(handler), **kw))
+
+        with pytest.raises(RuntimeError, match="invalid sender"):
+            provider.send("reader@example.com", "Subject", "<p>hi</p>", "key-1")
+
+    assert len(calls) == 1
 
 
 def test_default_provider_batch_is_a_noop_context():
