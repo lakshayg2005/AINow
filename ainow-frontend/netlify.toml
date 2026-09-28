@@ -1,0 +1,7 @@
+# Netlify reads this automatically and it overrides the
+# dashboard's Build settings, so it's the reliable way to pin
+# the publish directory to the build OUTPUT (dist), not the
+# source folder.
+[build]
+  command = "npm run build"
+  publish = "dist"
