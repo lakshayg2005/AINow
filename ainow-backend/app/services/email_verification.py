@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.models import EmailVerification, User
-from app.services.email.smtp_provider import SMTPEmailProvider
+from app.services.email.provider import get_email_provider
 
 
 VERIFICATION_EXPIRE_MINUTES = 30
@@ -63,7 +63,7 @@ def send_verification_email(
     user: User,
     token: str,
 ):
-    provider = SMTPEmailProvider()
+    provider = get_email_provider()
 
     verification_url = (
         f"{settings.frontend_url.rstrip('/')}/verify-email"

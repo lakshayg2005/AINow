@@ -4,6 +4,7 @@ Manage admin accounts.
     python -m app.admin make-admin you@example.com
     python -m app.admin remove-admin you@example.com
     python -m app.admin set-password you@example.com
+    python -m app.admin create-token you@example.com [--days 400]
     python -m app.admin list
 """
 
@@ -13,7 +14,7 @@ import argparse
 import getpass
 import sys
 
-from app.core.security import hash_password
+from app.core.security import create_service_token, hash_password
 from app.db.database import SessionLocal, engine
 from app.db.models import User
 from app.db.schema_patches import ensure_schema
@@ -25,6 +26,15 @@ def main() -> int:
 
     for command in ("make-admin", "remove-admin", "set-password"):
         sub.add_parser(command).add_argument("email")
+
+    token_parser = sub.add_parser("create-token")
+    token_parser.add_argument("email")
+    token_parser.add_argument(
+        "--days",
+        type=int,
+        default=400,
+        help="Validity in days (default 400).",
+    )
 
     sub.add_parser("list")
     args = parser.parse_args()
@@ -53,6 +63,21 @@ def main() -> int:
         if user is None:
             print(f"No account with email {args.email}. Register on the site first.")
             return 1
+
+        if args.command == "create-token":
+            if not user.is_admin:
+                print(f"{user.email} is not an admin; /admin/jobs/* would reject this token.")
+                return 1
+
+            token = create_service_token(user.id, days=args.days)
+
+            print(
+                f"Bearer token for {user.email}, valid {args.days} days.\n"
+                "Store it as a secret (e.g. a GitHub Actions repo secret named "
+                "ADMIN_TOKEN) — it will not be shown again:\n"
+            )
+            print(token)
+            return 0
 
         if args.command == "set-password":
             # Prompted, so the password stays out of shell history.

@@ -13,11 +13,15 @@ class Settings(BaseSettings):
     hf_token: str
     hf_model_id: str = "Qwen/Qwen3-8B"
 
+    # Only required if BREVO_API_KEY is unset (see get_email_provider).
     smtp_host: str = "smtp.gmail.com"
     smtp_port: int = 465
-    smtp_username: str
-    smtp_password: str
+    smtp_username: str | None = None
+    smtp_password: str | None = None
     email_from: str
+
+    # Used instead of SMTP when set (see get_email_provider).
+    brevo_api_key: str | None = None
 
     GITHUB_TOKEN: str | None = None
 
