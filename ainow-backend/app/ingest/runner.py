@@ -12,6 +12,7 @@ from app.ingest.http import make_client
 from app.ingest.registry import IngestSource, get_ingest_sources
 from app.ingest.store import (
     find_existing_urls,
+    find_unembedded_ids,
     index_items,
     upsert_items,
 )
@@ -312,6 +313,17 @@ async def run_ingestion(
         for item in final:
             if item.url not in existing:
                 per_source[item.source_key]["new"] += 1
+
+        # Catch up on anything a past run inserted but never
+        # embedded (e.g. it crashed mid-indexing) — otherwise
+        # those rows sit invisible to clustering forever, since
+        # nothing else ever revisits them.
+        backlog_ids = find_unembedded_ids(db, exclude=set(reindex_ids))
+
+        if backlog_ids:
+            print(f"[Ingest] Also catching up {len(backlog_ids)} previously unindexed items...")
+
+        reindex_ids = list(reindex_ids) + backlog_ids
 
         print(
             f"[Ingest] Indexing {len(reindex_ids)} items..."

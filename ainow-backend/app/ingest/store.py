@@ -208,6 +208,28 @@ def upsert_items(
     )
 
 
+def find_unembedded_ids(
+    db: Session,
+    exclude: set[int],
+    limit: int = 300,
+) -> list[int]:
+    """
+    Rows with no embedding yet — a backlog from an ingest run
+    that upserted them but crashed before indexing (e.g. the
+    embedding step itself failing). Capped per call so a large
+    backlog is worked off over a few runs instead of one huge one.
+    """
+
+    query = select(RawItem.id).where(RawItem.embedding.is_(None))
+
+    if exclude:
+        query = query.where(RawItem.id.notin_(exclude))
+
+    return list(
+        db.scalars(query.order_by(RawItem.id.desc()).limit(limit))
+    )
+
+
 # ============================================================
 # Chunk + embed (RAG store)
 # ============================================================
