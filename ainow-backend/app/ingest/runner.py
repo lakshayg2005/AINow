@@ -31,6 +31,9 @@ DEFAULT_LOOKBACK_DAYS = 7
 # host slower than local dev.
 FETCH_TIMEOUT_SECONDS = 360
 ENRICH_TIMEOUT_SECONDS = 600
+# Generous: this includes the one-time embedding model load,
+# which is the slowest thing a memory-constrained host will do.
+INDEX_TIMEOUT_SECONDS = 300
 
 # Items dated this far in the future are almost always
 # parse errors; drop them rather than pin them to the top.
@@ -314,10 +317,19 @@ async def run_ingestion(
             f"[Ingest] Indexing {len(reindex_ids)} items..."
         )
 
-        chunk_count = index_items(
-            db,
-            reindex_ids,
-        )
+        try:
+            # index_items is a plain blocking call (it's not
+            # async), so it needs its own thread before a
+            # timeout can apply to it at all.
+            chunk_count = await asyncio.wait_for(
+                asyncio.to_thread(index_items, db, reindex_ids),
+                timeout=INDEX_TIMEOUT_SECONDS,
+            )
+        except TimeoutError:
+            raise TimeoutError(
+                f"Indexing took longer than {INDEX_TIMEOUT_SECONDS}s "
+                "(likely the embedding model load — see [Embeddings] logs)"
+            )
 
         stats = {
             "sources": {

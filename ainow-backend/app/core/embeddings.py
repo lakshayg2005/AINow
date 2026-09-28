@@ -26,9 +26,13 @@ def _get_model() -> SentenceTransformer:
     global _model
 
     if _model is None:
+        print(f"[Embeddings] Loading {MODEL_NAME} (first use this run)...")
+
         from sentence_transformers import SentenceTransformer
 
         _model = SentenceTransformer(MODEL_NAME)
+
+        print("[Embeddings] Model loaded.")
 
     return _model
 
