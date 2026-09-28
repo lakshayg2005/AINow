@@ -24,6 +24,14 @@ from app.schemas.ingest import IngestedItem
 
 DEFAULT_LOOKBACK_DAYS = 7
 
+# Every individual fetch is already bounded by http.py's client
+# timeouts, but these are a hard ceiling on the whole step, so a
+# run can never hang indefinitely (and block every later job)
+# no matter what goes wrong underneath. Generous for a free-tier
+# host slower than local dev.
+FETCH_TIMEOUT_SECONDS = 360
+ENRICH_TIMEOUT_SECONDS = 600
+
 # Items dated this far in the future are almost always
 # parse errors; drop them rather than pin them to the top.
 MAX_FUTURE_SKEW = timedelta(days=1)
@@ -180,16 +188,26 @@ async def run_ingestion(
             # 1. Fetch all sources concurrently
             # ------------------------------------------------
 
-            results = await asyncio.gather(
-                *(
-                    _fetch_source(
-                        client,
-                        source,
-                        lookback_days,
-                    )
-                    for source in sources
+            print(f"[Ingest] Fetching {len(sources)} sources...")
+
+            try:
+                results = await asyncio.wait_for(
+                    asyncio.gather(
+                        *(
+                            _fetch_source(
+                                client,
+                                source,
+                                lookback_days,
+                            )
+                            for source in sources
+                        )
+                    ),
+                    timeout=FETCH_TIMEOUT_SECONDS,
                 )
-            )
+            except TimeoutError:
+                raise TimeoutError(
+                    f"Fetching sources took longer than {FETCH_TIMEOUT_SECONDS}s"
+                )
 
             candidates: list[IngestedItem] = []
             source_by_key = {
@@ -241,10 +259,23 @@ async def run_ingestion(
                     f"[Ingest] Enriching {len(new_items)} new items..."
                 )
 
-                enrichment = await enrich_items(
-                    client,
-                    new_items,
-                )
+                try:
+                    enrichment = await asyncio.wait_for(
+                        enrich_items(
+                            client,
+                            new_items,
+                        ),
+                        timeout=ENRICH_TIMEOUT_SECONDS,
+                    )
+                except TimeoutError:
+                    # Enrichment only adds full article text; items
+                    # keep their feed summary either way, so fall
+                    # back to "unenriched" rather than failing the
+                    # whole run.
+                    print(
+                        f"[Ingest] Enrichment took longer than {ENRICH_TIMEOUT_SECONDS}s, "
+                        "continuing without it."
+                    )
 
         # ----------------------------------------------------
         # 3. Re-apply the date window now that enrichment
