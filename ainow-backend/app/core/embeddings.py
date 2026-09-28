@@ -86,7 +86,10 @@ def _local_embed(
 # Remote backend (Hugging Face Inference API)
 # ============================================================
 
-HF_INFERENCE_URL = f"https://api-inference.huggingface.co/models/{HF_MODEL_PATH}"
+HF_INFERENCE_URL = (
+    f"https://router.huggingface.co/hf-inference/models/{HF_MODEL_PATH}"
+    "/pipeline/feature-extraction"
+)
 
 # wait_for_model below already covers a cold model; this only
 # covers transient network/rate-limit trouble on top of that.
