@@ -1,4 +1,9 @@
+import { Link } from "react-router-dom"
+import { useAuth } from "../context/auth"
+
 function Hero() {
+    const { isAuthenticated } = useAuth()
+
     return (
       <section className="relative overflow-hidden bg-black text-white">
         <div className="mx-auto flex min-h-[85vh] max-w-7xl items-center px-6 py-24">
@@ -25,13 +30,20 @@ function Hero() {
   
             {/* Buttons */}
             <div className="mt-10 flex flex-col gap-4 sm:flex-row">
-              <button className="rounded-xl bg-white px-7 py-3.5 font-semibold text-black transition hover:bg-gray-200">
+              {/* Signed-in readers subscribe from their dashboard. */}
+              <Link
+                to={isAuthenticated ? "/dashboard" : "/register"}
+                className="rounded-xl bg-white px-7 py-3.5 text-center font-semibold text-black transition hover:bg-gray-200"
+              >
                 Get the Newsletter →
-              </button>
-  
-              <button className="rounded-xl border border-gray-700 px-7 py-3.5 font-semibold text-white transition hover:bg-gray-900">
+              </Link>
+
+              <Link
+                to="/newsletters"
+                className="rounded-xl border border-gray-700 px-7 py-3.5 text-center font-semibold text-white transition hover:bg-gray-900"
+              >
                 Explore Newsletters
-              </button>
+              </Link>
             </div>
   
             {/* Trust text */}

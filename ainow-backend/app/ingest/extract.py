@@ -1,52 +1,16 @@
+"""
+Main-text extraction from article pages: JSON-LD
+articleBody first, then the richest semantic container,
+then all paragraphs.
+"""
+
 from __future__ import annotations
 
 import json
 import re
 from typing import Iterable
 
-import httpx
 from bs4 import BeautifulSoup
-
-
-# ============================================================
-# HTTP
-# ============================================================
-
-DEFAULT_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 "
-        "(KHTML, like Gecko) "
-        "Chrome/139.0 Safari/537.36 "
-        "AINowResearch/1.0"
-    ),
-    "Accept": (
-        "text/html,application/xhtml+xml,"
-        "application/xml;q=0.9,*/*;q=0.8"
-    ),
-    "Accept-Language": "en-US,en;q=0.9",
-    "Cache-Control": "no-cache",
-}
-
-
-async def fetch_web_page(
-    url: str,
-) -> str:
-    timeout = httpx.Timeout(
-        connect=10.0,
-        read=30.0,
-        write=10.0,
-        pool=10.0,
-    )
-
-    async with httpx.AsyncClient(
-        timeout=timeout,
-        follow_redirects=True,
-        headers=DEFAULT_HEADERS,
-    ) as client:
-        response = await client.get(url)
-        response.raise_for_status()
-        return response.text
 
 
 # ============================================================
@@ -407,19 +371,3 @@ def extract_article_text(
     )
 
     return best_text.strip()
-
-
-# ============================================================
-# Full article fetch
-# ============================================================
-
-async def fetch_article_text(
-    url: str,
-) -> str:
-    html = await fetch_web_page(
-        url
-    )
-
-    return extract_article_text(
-        html
-    )

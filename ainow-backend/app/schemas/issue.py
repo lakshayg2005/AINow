@@ -102,6 +102,31 @@ class IssueStats(BaseModel):
     window_days: int = 7
     models: list[str] = Field(default_factory=list)
     numbers_removed: int = 0
+    images_replaced: int = 0
+
+
+class ReviewNote(BaseModel):
+    section: str
+    note: str
+    # "fix": should change before publishing; "consider": optional.
+    severity: str = "consider"
+    item: str = ""
+
+
+class IssueReview(BaseModel):
+    """
+    Editor-facing quality review of a draft. Shown in the admin
+    newsroom only; never rendered on the site or in email.
+    """
+
+    # 1-10 from the reviewing model; None if no model answered.
+    score: int | None = None
+    verdict: str = ""
+    notes: list[ReviewNote] = Field(default_factory=list)
+    # Deterministic checks (missing sections, uncited cards...).
+    checks: list[ReviewNote] = Field(default_factory=list)
+    model: str = ""
+    reviewed_at: datetime | None = None
 
 
 class IssueContent(BaseModel):
@@ -123,6 +148,7 @@ class IssueContent(BaseModel):
 
     sources: list[SourceRef] = Field(default_factory=list)
     stats: IssueStats = Field(default_factory=IssueStats)
+    review: IssueReview | None = None
 
     def story_ids(self) -> list[tuple[int, str, str, str]]:
         """(story_id, section, headline, summary) for every story used."""

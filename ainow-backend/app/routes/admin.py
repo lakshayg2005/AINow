@@ -5,7 +5,9 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.compose.persist import load_issue_content
+from app.compose.images import vet_images
+from app.compose.persist import load_issue_content, update_issue_content
+from app.compose.review import review_issue
 from app.core.config import settings
 from app.core.dependencies import get_current_admin
 from app.db.database import get_db
@@ -188,10 +190,38 @@ def list_issues(db: Session = Depends(get_db)):
                 "sources": len(content.sources) if content else None,
                 "models": content.stats.models if content else [],
                 "deliveries": counts.get(issue.id, {}),
+                "review": (
+                    content.review.model_dump(mode="json")
+                    if content and content.review
+                    else None
+                ),
             }
         )
 
     return rows
+
+
+@router.post("/issues/{issue_id}/recheck")
+async def recheck(issue_id: int, db: Session = Depends(get_db)):
+    """Re-check a draft's images and review it again."""
+
+    issue = _get_issue(db, issue_id)
+    content = load_issue_content(issue)
+
+    if content is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Only new-format issues can be reviewed")
+
+    if issue.status != "draft":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Published issues are not changed")
+
+    content.stats.images_replaced = await vet_images(db, content)
+    content.review = await review_issue(db, content)
+    update_issue_content(db, issue, content)
+
+    return {
+        "images_replaced": content.stats.images_replaced,
+        "review": content.review.model_dump(mode="json"),
+    }
 
 
 @router.post("/issues/{issue_id}/test-send")

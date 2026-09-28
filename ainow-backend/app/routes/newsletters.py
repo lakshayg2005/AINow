@@ -1,38 +1,49 @@
-from datetime import datetime
+"""
+Public newsletter archive: list, search and read published
+issues, plus the admin-only draft preview.
 
-from fastapi import APIRouter, Depends, HTTPException, status
+Drafts are created, published and deleted from the admin
+newsroom (app/routes/admin.py).
+"""
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.db.database import get_db
-from app.db.models import NewsletterIssue, NewsletterSection, User
-from app.schemas.newsletter import (
-    NewsletterCreateRequest,
-    NewsletterCreateResponse,
-    NewsletterDetailResponse,
-    NewsletterSectionCreateRequest,
-    NewsletterSectionResponse,
-    NewsletterSummaryResponse,
-)
 from app.compose.persist import load_issue_content
 from app.core.dependencies import get_current_admin
-from app.jobs import JobConflict, start_job
-from app.services.publishing import PublishError, publish_issue
+from app.db.database import get_db
+from app.db.models import CoveredStory, NewsletterIssue, User
+from app.ingest.utils import truncate
+from app.schemas.issue import IssueContent
+from app.schemas.newsletter import (
+    ArchiveMatch,
+    ArchiveSearchResult,
+    NewsletterDetailResponse,
+    NewsletterSummaryResponse,
+)
+from app.services.archive_search import search_archive
+
+
+def _cover_image(
+    content: IssueContent | None,
+) -> str | None:
+    if content is None:
+        return None
+
+    cards = (
+        ([content.deep_dive] if content.deep_dive else [])
+        + list(content.quick_news)
+        + ([content.paper_of_week] if content.paper_of_week else [])
+    )
+
+    return next((card.image_url for card in cards if card.image_url), None)
 
 
 def _summary(
     issue: NewsletterIssue,
 ) -> NewsletterSummaryResponse:
     content = load_issue_content(issue)
-
-    cover = None
-
-    if content:
-        cards = (
-            ([content.deep_dive] if content.deep_dive else [])
-            + list(content.quick_news)
-            + ([content.paper_of_week] if content.paper_of_week else [])
-        )
-        cover = next((card.image_url for card in cards if card.image_url), None)
 
     return NewsletterSummaryResponse(
         id=issue.id,
@@ -42,14 +53,18 @@ def _summary(
         published_at=issue.published_at,
         headline=content.headline if content else None,
         intro=content.intro if content else None,
-        cover_image=cover,
+        cover_image=_cover_image(content),
     )
 
 
 def _detail(
     issue: NewsletterIssue,
+    include_review: bool = False,
 ) -> NewsletterDetailResponse:
     content = load_issue_content(issue)
+
+    # The editor's review is for the admin preview only.
+    exclude = None if include_review else {"review"}
 
     return NewsletterDetailResponse(
         id=issue.id,
@@ -58,7 +73,7 @@ def _detail(
         created_at=issue.created_at,
         published_at=issue.published_at,
         html_content=issue.html_content,
-        content=content.model_dump(mode="json") if content else None,
+        content=content.model_dump(mode="json", exclude=exclude) if content else None,
     )
 
 
@@ -66,172 +81,6 @@ router = APIRouter(
     prefix="/newsletters",
     tags=["Newsletters"],
 )
-
-
-# ---------------------------------------------------------
-# CREATE DRAFT
-# ---------------------------------------------------------
-@router.post(
-    "",
-    response_model=NewsletterCreateResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-def create_newsletter(
-    newsletter_data: NewsletterCreateRequest,
-    db: Session = Depends(get_db),
-    _admin: User = Depends(get_current_admin),
-):
-    newsletter = NewsletterIssue(
-        title=newsletter_data.title,
-        status="draft",
-    )
-
-    db.add(newsletter)
-    db.commit()
-    db.refresh(newsletter)
-
-    return newsletter
-
-
-# ---------------------------------------------------------
-# ADD SECTION TO DRAFT
-# ---------------------------------------------------------
-
-@router.post(
-    "/{newsletter_id}/sections",
-    response_model=NewsletterSectionResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-def add_newsletter_section(
-    newsletter_id: int,
-    section_data: NewsletterSectionCreateRequest,
-    db: Session = Depends(get_db),
-    _admin: User = Depends(get_current_admin),
-):
-    newsletter = (
-        db.query(NewsletterIssue)
-        .filter(NewsletterIssue.id == newsletter_id)
-        .first()
-    )
-
-    if not newsletter:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Newsletter not found",
-        )
-
-    if newsletter.status != "draft":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Sections can only be added to a draft newsletter",
-        )
-
-    section = NewsletterSection(
-        newsletter_issue_id=newsletter_id,
-        section_type=section_data.section_type,
-        title=section_data.title,
-        content=section_data.content,
-        display_order=section_data.display_order,
-    )
-
-    db.add(section)
-    db.commit()
-    db.refresh(section)
-
-    return section
-
-
-# ---------------------------------------------------------
-# SAVE FINAL HTML
-# ---------------------------------------------------------
-
-@router.put(
-    "/{newsletter_id}/html",
-    status_code=status.HTTP_200_OK,
-)
-def save_newsletter_html(
-    newsletter_id: int,
-    html_content: str,
-    db: Session = Depends(get_db),
-    _admin: User = Depends(get_current_admin),
-):
-    newsletter = (
-        db.query(NewsletterIssue)
-        .filter(NewsletterIssue.id == newsletter_id)
-        .first()
-    )
-
-    if not newsletter:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Newsletter not found",
-        )
-
-    if newsletter.status != "draft":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="HTML can only be updated for a draft newsletter",
-        )
-
-    newsletter.html_content = html_content
-
-    db.commit()
-    db.refresh(newsletter)
-
-    return {
-        "message": "Newsletter HTML saved successfully",
-        "newsletter_id": newsletter.id,
-    }
-
-
-# ---------------------------------------------------------
-# PUBLISH
-# ---------------------------------------------------------
-
-@router.post(
-    "/{newsletter_id}/publish",
-    status_code=status.HTTP_200_OK,
-)
-async def publish_newsletter(
-    newsletter_id: int,
-    _admin: User = Depends(get_current_admin),
-    db: Session = Depends(get_db),
-):
-    newsletter = (
-        db.query(NewsletterIssue)
-        .filter(NewsletterIssue.id == newsletter_id)
-        .first()
-    )
-
-    if not newsletter:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Newsletter not found",
-        )
-
-    try:
-        stories_recorded = publish_issue(db, newsletter)
-    except PublishError as error:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(error),
-        )
-
-    # Sending to every subscriber takes a while; do it in the
-    # background and let the caller poll /admin/jobs/{id}.
-    try:
-        job = start_job("deliver", params={"issue_id": newsletter.id})
-        job_id = job.id
-    except JobConflict:
-        job_id = None
-
-    return {
-        "message": "Newsletter published; delivery started",
-        "newsletter_id": newsletter.id,
-        "published_at": newsletter.published_at,
-        "stories_recorded": stories_recorded,
-        "delivery_job_id": job_id,
-    }
 
 
 # ---------------------------------------------------------
@@ -243,16 +92,66 @@ async def publish_newsletter(
     response_model=list[NewsletterSummaryResponse],
 )
 def get_newsletters(
+    limit: int | None = Query(default=None, ge=1, le=100),
     db: Session = Depends(get_db),
 ):
-    newsletters = (
+    # Some early issues were published without a timestamp.
+    query = (
         db.query(NewsletterIssue)
         .filter(NewsletterIssue.status == "published")
-        .order_by(NewsletterIssue.published_at.desc())
-        .all()
+        .order_by(
+            func.coalesce(NewsletterIssue.published_at, NewsletterIssue.created_at).desc()
+        )
     )
 
-    return [_summary(issue) for issue in newsletters]
+    if limit:
+        query = query.limit(limit)
+
+    return [_summary(issue) for issue in query.all()]
+
+
+# ---------------------------------------------------------
+# ARCHIVE SEARCH (declared before /{newsletter_id})
+# ---------------------------------------------------------
+
+@router.get(
+    "/search",
+    response_model=list[ArchiveSearchResult],
+)
+def search_newsletters(
+    q: str = Query(min_length=2, max_length=200),
+    db: Session = Depends(get_db),
+):
+    results = []
+
+    for issue, stories in search_archive(db, q):
+        content = load_issue_content(issue)
+
+        # A story can be recorded once per section it appeared in.
+        unique: dict[str, CoveredStory] = {}
+
+        for story in stories:
+            unique.setdefault(story.headline, story)
+
+        results.append(
+            ArchiveSearchResult(
+                id=issue.id,
+                title=issue.title,
+                published_at=issue.published_at or issue.created_at,
+                headline=content.headline if content else None,
+                cover_image=_cover_image(content),
+                matches=[
+                    ArchiveMatch(
+                        headline=story.headline,
+                        section=story.section_type,
+                        summary=truncate(story.summary, 220) if story.summary else None,
+                    )
+                    for story in unique.values()
+                ],
+            )
+        )
+
+    return results
 
 
 # ---------------------------------------------------------
@@ -276,11 +175,11 @@ def preview_newsletter(
             detail="Newsletter not found",
         )
 
-    return _detail(newsletter)
+    return _detail(newsletter, include_review=True)
 
 
 # ---------------------------------------------------------
-# PUBLIC DETAIL / FINAL HTML
+# PUBLIC DETAIL
 # ---------------------------------------------------------
 
 @router.get(

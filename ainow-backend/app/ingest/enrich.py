@@ -15,7 +15,7 @@ from app.ingest.utils import (
     parse_iso_datetime,
     truncate,
 )
-from app.research.web_extract import extract_article_text
+from app.ingest.extract import extract_article_text
 from app.schemas.ingest import IngestedItem
 
 

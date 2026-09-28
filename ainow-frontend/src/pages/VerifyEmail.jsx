@@ -1,65 +1,36 @@
 import { useEffect, useState } from "react"
 import { Link, useSearchParams } from "react-router-dom"
-
-const API_BASE_URL = "http://127.0.0.1:8000"
+import { verifyEmail } from "../services/api"
 
 function VerifyEmail() {
   const [searchParams] = useSearchParams()
+  const token = searchParams.get("token")
 
-  const [status, setStatus] = useState("verifying")
-  const [message, setMessage] = useState("")
+  const [result, setResult] = useState(null)
+
+  // A link without a token fails without calling the API.
+  const status = !token ? "error" : result?.status || "verifying"
+  const message = !token ? "Verification token is missing." : result?.message || ""
 
   useEffect(() => {
-    const token = searchParams.get("token")
-
-    if (!token) {
-      setStatus("error")
-      setMessage("Verification token is missing.")
-      return
-    }
+    if (!token) return undefined
 
     let cancelled = false
 
-    async function verify() {
-      try {
-        const response = await fetch(
-          `${API_BASE_URL}/auth/verify-email?token=${encodeURIComponent(token)}`
-        )
-
-        const data = await response.json()
-
-        if (cancelled) {
-          return
+    verifyEmail(token)
+      .then((data) => {
+        if (!cancelled) setResult({ status: "success", message: data.message })
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setResult({ status: "error", message: error.message || "Email verification failed." })
         }
-
-        if (!response.ok) {
-          throw new Error(
-            data.detail ||
-            "Email verification failed."
-          )
-        }
-
-        setStatus("success")
-        setMessage(data.message)
-      } catch (error) {
-        if (cancelled) {
-          return
-        }
-
-        setStatus("error")
-        setMessage(
-          error.message ||
-          "Email verification failed."
-        )
-      }
-    }
-
-    verify()
+      })
 
     return () => {
       cancelled = true
     }
-  }, [searchParams])
+  }, [token])
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-black px-6 text-white">

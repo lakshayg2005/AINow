@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import os
-
-from sentence_transformers import SentenceTransformer
+from typing import TYPE_CHECKING
 
 from app.core.config import settings
+
+# Importing sentence_transformers (and torch) takes ~10s, so
+# it happens on first use rather than at API startup.
+if TYPE_CHECKING:
+    from sentence_transformers import SentenceTransformer
 
 
 # The model download reads HF_TOKEN from the environment, not
@@ -22,6 +26,8 @@ def _get_model() -> SentenceTransformer:
     global _model
 
     if _model is None:
+        from sentence_transformers import SentenceTransformer
+
         _model = SentenceTransformer(MODEL_NAME)
 
     return _model

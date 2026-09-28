@@ -48,12 +48,42 @@ def save_issue_draft(
 ) -> NewsletterIssue:
     issue = NewsletterIssue(
         title=content.title,
-        raw_content=content.model_dump_json(indent=2),
         status="draft",
     )
 
     db.add(issue)
     db.flush()
+
+    _write_content(db, issue, content)
+
+    db.commit()
+    db.refresh(issue)
+
+    return issue
+
+
+def update_issue_content(
+    db: Session,
+    issue: NewsletterIssue,
+    content: IssueContent,
+) -> None:
+    """Replace a draft's content (e.g. after re-checking it)."""
+
+    db.query(NewsletterSection).filter(
+        NewsletterSection.newsletter_issue_id == issue.id
+    ).delete()
+
+    _write_content(db, issue, content)
+
+    db.commit()
+
+
+def _write_content(
+    db: Session,
+    issue: NewsletterIssue,
+    content: IssueContent,
+) -> None:
+    issue.raw_content = content.model_dump_json(indent=2)
 
     order = 1
 
@@ -83,11 +113,6 @@ def save_issue_draft(
         web_url=web_url_for(issue.id),
         manage_url=f"{settings.frontend_url.rstrip('/')}/dashboard",
     )
-
-    db.commit()
-    db.refresh(issue)
-
-    return issue
 
 
 def mark_issue_covered(

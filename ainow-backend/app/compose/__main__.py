@@ -5,8 +5,8 @@ Compose this week's issue as a draft.
     python -m app.compose --refresh            # re-cluster/triage first
     python -m app.compose --dry-run --out preview.html
 
-The draft appears in newsletter_issues (status=draft). Publish
-it with POST /newsletters/{id}/publish; publishing records its
+The draft appears in the admin newsroom (/admin), where it is
+previewed, test-sent and published; publishing records its
 stories in the freshness memory.
 """
 
@@ -18,6 +18,7 @@ from pathlib import Path
 
 from app.compose.composer import compose_issue
 from app.compose.persist import save_issue_draft
+from app.core.config import settings
 from app.db.database import SessionLocal, engine
 from app.db.schema_patches import ensure_schema
 from app.services.issue_email import render_issue_email
@@ -62,6 +63,16 @@ def _print_summary(content) -> None:
         f"models: {', '.join(content.stats.models) or 'none (extractive fallback)'}"
     )
 
+    review = content.review
+
+    if review:
+        score = f"{review.score}/10" if review.score is not None else "checks only"
+        fixes = sum(note.severity == "fix" for note in [*review.notes, *review.checks])
+        print(f"Review: {score}, {fixes} to fix. {review.verdict}")
+
+        for note in [*review.notes, *review.checks]:
+            print(f"  [{note.severity}] {note.section}: {note.note}")
+
 
 async def _main() -> None:
     parser = argparse.ArgumentParser(prog="python -m app.compose")
@@ -90,7 +101,7 @@ async def _main() -> None:
             print(f"\nDraft saved: newsletter_issues.id={issue.id}")
 
         if args.out:
-            html = html or render_issue_email(content, web_url="http://localhost:5173/newsletters")
+            html = html or render_issue_email(content, web_url=f"{settings.frontend_url.rstrip('/')}/newsletters")
             args.out.write_text(html, encoding="utf-8")
             print(f"Email HTML written to {args.out}")
 

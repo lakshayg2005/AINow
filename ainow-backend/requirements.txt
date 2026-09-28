@@ -12,12 +12,9 @@ sentence-transformers
 feedparser
 httpx
 beautifulsoup4
-#LLM Orchestration Packages
-langgraph
-langchain
-langchain-huggingface
+pillow
+#Models and MCP
 huggingface_hub
 mcp
 #Email delivery
 #resend(instead i used google mail service)
-beautifulsoup4

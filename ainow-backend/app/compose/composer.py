@@ -7,6 +7,7 @@ Compose one newsletter issue from the week's stories.
         -> verify numbers against the context
         -> editorial pass (headline, intro, trends, concept, take)
         -> renumber sources to the ones actually cited
+        -> check images, then review the draft for the editor
 """
 
 from __future__ import annotations
@@ -17,6 +18,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.compose.context import SourceRegistry, StoryContext, build_story_context
+from app.compose.images import vet_images
+from app.compose.review import review_issue
 from app.compose.selection import Candidate, build_candidates, select_sections
 from app.compose.verify import strip_unsupported
 from app.compose.writer import (
@@ -338,5 +341,11 @@ async def compose_issue(
 
     _renumber_sources(content, registry)
     content.stats.sources_used = len(content.sources)
+
+    print("[Compose] Checking images...")
+    content.stats.images_replaced = await vet_images(db, content)
+
+    print("[Compose] Reviewing draft...")
+    content.review = await review_issue(db, content)
 
     return content
