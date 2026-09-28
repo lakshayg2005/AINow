@@ -1,5 +1,8 @@
 # AINow
 
+**Live:** [ainow-frontend.netlify.app](https://ainow-frontend.netlify.app) · [API](https://ainow-backend-ixam.onrender.com)
+*(free-tier backend — the first load after a quiet spell can take ~30–50s while it wakes up)*
+
 A weekly AI newsletter, written by an automated pipeline and reviewed by an
 editor before it goes out. It reads ~20 sources (lab blogs, research feeds,
 Hugging Face, GitHub, Hacker News, AI news outlets), groups articles into
