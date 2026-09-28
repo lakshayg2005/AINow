@@ -27,7 +27,9 @@ def get_current_user(
 
     user_id = payload.get("sub")
 
-    if not user_id:
+    # Purpose-scoped tokens (e.g. unsubscribe links) are not
+    # sessions.
+    if not user_id or payload.get("purpose"):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token",
@@ -53,3 +55,14 @@ def get_current_user(
         )
 
     return user
+
+def get_current_admin(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required",
+        )
+
+    return current_user

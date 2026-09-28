@@ -1,6 +1,16 @@
 from __future__ import annotations
 
+import os
+
 from sentence_transformers import SentenceTransformer
+
+from app.core.config import settings
+
+
+# The model download reads HF_TOKEN from the environment, not
+# from .env; without it the Hub warns about anonymous requests.
+if settings.hf_token:
+    os.environ.setdefault("HF_TOKEN", settings.hf_token)
 
 
 MODEL_NAME = "all-MiniLM-L6-v2"

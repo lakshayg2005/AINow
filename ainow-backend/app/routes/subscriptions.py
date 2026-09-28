@@ -1,9 +1,11 @@
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_user
+from app.core.security import decode_unsubscribe_token
 from app.db.database import get_db
 from app.db.models import Subscription, User
 from app.schemas.subscription import SubscriptionResponse
@@ -162,4 +164,60 @@ def cancel_subscription(
         "created_at": subscription.created_at,
         "updated_at": subscription.updated_at,
         "message": "Your AINow subscription has been canceled.",
+    }
+
+# ---------------------------------------------------------
+# UNSUBSCRIBE (no login)
+# ---------------------------------------------------------
+
+class UnsubscribeRequest(BaseModel):
+    token: str | None = None
+
+
+@router.post(
+    "/unsubscribe",
+)
+def unsubscribe(
+    token: str | None = None,
+    request: UnsubscribeRequest | None = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Unsubscribe via the signed link in every newsletter.
+
+    Mail clients' one-click button (RFC 8058) POSTs here with
+    the token in the query string; the /unsubscribe page sends
+    it in the JSON body after the reader confirms.
+    """
+
+    raw_token = token or (request.token if request else None)
+
+    if not raw_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing unsubscribe token.",
+        )
+
+    try:
+        user_id = decode_unsubscribe_token(raw_token)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This unsubscribe link is invalid.",
+        )
+
+    subscription = (
+        db.query(Subscription)
+        .filter(Subscription.user_id == user_id)
+        .first()
+    )
+
+    if subscription and subscription.status == "active":
+        subscription.status = "canceled"
+        subscription.updated_at = datetime.utcnow()
+        db.commit()
+
+    # Same answer whether or not they were subscribed.
+    return {
+        "message": "You have been unsubscribed from AINow.",
     }

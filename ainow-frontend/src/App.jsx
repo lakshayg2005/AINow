@@ -12,6 +12,8 @@ import Register from "./pages/Register";
 import Dashboard from "./pages/Dashboard";
 import NewsletterDetail from "./pages/NewsletterDetails";
 import VerifyEmail from "./pages/VerifyEmail";
+import Admin from "./pages/Admin";
+import Unsubscribe from "./pages/Unsubscribe";
 import ProtectedRoute from "./components/ProtectedRoute";
 
 
@@ -47,6 +49,17 @@ function App() {
         {/* <Route path="/newsletter-details" element={<NewsletterDetails />} /> */}
 
         <Route path="/verify-email" element={<VerifyEmail />} />
+
+        <Route path="/unsubscribe" element={<Unsubscribe />} />
+
+        <Route
+          path="/admin"
+          element={
+            <ProtectedRoute>
+              <Admin />
+            </ProtectedRoute>
+          }
+        />
 
         <Route
   path="/newsletters/:id"

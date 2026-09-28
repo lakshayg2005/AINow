@@ -325,12 +325,12 @@ def resend_verification(
         )
     }
 
-# @router.get(
-#     "/me",
-#     response_model=CurrentUserResponse,
-# )
-# def get_me(
-#     current_user: User = Depends(get_current_user),
-# ):
-#     return current_user
+@router.get(
+    "/me",
+    response_model=CurrentUserResponse,
+)
+def get_me(
+    current_user: User = Depends(get_current_user),
+):
+    return current_user
 

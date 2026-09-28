@@ -43,6 +43,15 @@ function Navbar() {
 
         {isAuthenticated ? (
           <div className="flex items-center gap-4">
+            {user?.is_admin && (
+              <Link
+                to="/admin"
+                className="text-sm font-medium text-indigo-300 hover:text-indigo-200"
+              >
+                Admin
+              </Link>
+            )}
+
             <Link
               to="/dashboard"
               className="text-sm text-gray-300 hover:text-white"

@@ -2,11 +2,18 @@ import { useEffect, useState } from "react"
 import {
   Link,
   useParams,
+  useSearchParams,
 } from "react-router-dom"
-import { getNewsletter } from "../services/api"
+import IssueView from "../components/issue/IssueView"
+import {
+  getNewsletter,
+  getNewsletterPreview,
+} from "../services/api"
 
 function NewsletterDetail() {
   const { id } = useParams()
+  const [searchParams] = useSearchParams()
+  const isPreview = searchParams.get("preview") === "1"
 
   const [newsletter, setNewsletter] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -15,7 +22,9 @@ function NewsletterDetail() {
   useEffect(() => {
     async function loadNewsletter() {
       try {
-        const data = await getNewsletter(id)
+        const data = isPreview
+          ? await getNewsletterPreview(id)
+          : await getNewsletter(id)
         setNewsletter(data)
       } catch (err) {
         setError(
@@ -28,15 +37,19 @@ function NewsletterDetail() {
     }
 
     loadNewsletter()
-  }, [id])
+  }, [id, isPreview])
 
   if (loading) {
     return (
       <main className="min-h-screen bg-black px-6 py-24 text-white">
-        <div className="mx-auto max-w-5xl">
-          <p className="text-gray-400">
-            Loading newsletter...
-          </p>
+        <div className="mx-auto max-w-5xl animate-pulse">
+          <div className="h-4 w-32 rounded bg-neutral-800" />
+          <div className="mt-8 h-14 w-3/4 rounded bg-neutral-900" />
+          <div className="mt-4 h-5 w-2/3 rounded bg-neutral-900" />
+          <div className="mt-16 grid gap-6 md:grid-cols-2">
+            <div className="h-72 rounded-2xl bg-neutral-900" />
+            <div className="h-72 rounded-2xl bg-neutral-900" />
+          </div>
         </div>
       </main>
     )
@@ -61,6 +74,18 @@ function NewsletterDetail() {
     )
   }
 
+  // Issues written by the new pipeline carry structured
+  // content and get the interactive view.
+  if (newsletter.content?.version === 2) {
+    return (
+      <IssueView
+        issue={newsletter}
+        isPreview={isPreview && newsletter.status !== "published"}
+      />
+    )
+  }
+
+  // Legacy issues: render the stored HTML.
   return (
     <main className="min-h-screen bg-neutral-200 py-8">
 
