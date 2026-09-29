@@ -120,7 +120,7 @@ async def _ingest(db: Session, params: dict) -> dict:
 
 
 async def _compose(db: Session, params: dict) -> dict:
-    from app.compose.composer import compose_issue
+    from app.compose.graph import compose_issue
     from app.compose.persist import save_issue_draft
 
     content = await compose_issue(db, window_days=int(params.get("days", 7)))

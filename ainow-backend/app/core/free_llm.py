@@ -1,10 +1,10 @@
 """
-Free-tier LLM access with provider fallback.
+Free-tier LLM access with provider fallback, built on LangChain
+(`ChatOpenAI` talking to each provider's OpenAI-compatible
+endpoint).
 
-Every provider below exposes an OpenAI-compatible
-/chat/completions endpoint, so one small client covers all
-of them. Providers are tried in order; a provider that
-rate-limits or errors is skipped for the rest of the process.
+Providers are tried in order; a provider that rate-limits or
+errors is skipped for the rest of the process.
 
 Tiers:
     fast   - cheap classification (triage)
@@ -26,6 +26,9 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 import httpx
+from langchain_core.exceptions import ModelConnectionError, ModelError, ModelRateLimitError, ModelTimeoutError
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from langchain_openai import ChatOpenAI
 
 from app.core.config import settings
 
@@ -217,22 +220,26 @@ COOLDOWN_SECONDS = 300
 # window is far better than dropping to a weaker provider.
 MAX_RATE_LIMIT_WAIT = 75
 RATE_LIMIT_RETRIES = 3
+TRANSPORT_RETRIES = 3
 
 _RETRY_IN = re.compile(r"try again in (?:(\d+)m)?([\d.]+)s", re.IGNORECASE)
 
 
 def _retry_after_seconds(
-    response: httpx.Response,
+    error: ModelRateLimitError,
 ) -> float | None:
-    header = response.headers.get("retry-after")
+    response = getattr(error, "response", None)
 
-    if header:
-        try:
-            return float(header)
-        except ValueError:
-            pass
+    if response is not None:
+        header = response.headers.get("retry-after")
 
-    match = _RETRY_IN.search(response.text)
+        if header:
+            try:
+                return float(header)
+            except ValueError:
+                pass
+
+    match = _RETRY_IN.search(str(error))
 
     if match:
         return int(match.group(1) or 0) * 60 + float(match.group(2))
@@ -240,13 +247,72 @@ def _retry_after_seconds(
     return None
 
 
-async def _post_with_retry(
-    client: httpx.AsyncClient,
-    url: str,
-    api_key: str | None,
-    payload: dict[str, Any],
-    attempts: int = 3,
-) -> httpx.Response:
+def _error_label(
+    error: Exception,
+) -> str:
+    status = getattr(error, "status_code", None)
+    return str(status) if status is not None else type(error).__name__
+
+
+def _build_model(
+    provider: Provider,
+    model_name: str,
+    max_tokens: int,
+    temperature: float,
+) -> ChatOpenAI:
+    model_kwargs: dict[str, Any] = {}
+    extra_body: dict[str, Any] = {}
+
+    if provider.json_mode:
+        model_kwargs["response_format"] = {"type": "json_object"}
+
+    # gpt-oss reasons before answering; its hidden reasoning
+    # tokens count against max_tokens. Sent via extra_body (a
+    # raw body passthrough) since it's a Groq-specific field the
+    # OpenAI client doesn't know about.
+    if "gpt-oss" in model_name:
+        extra_body["reasoning_effort"] = "low"
+
+    return ChatOpenAI(
+        base_url=provider.base_url,
+        api_key=provider.api_key,
+        model=model_name,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        timeout=httpx.Timeout(120.0, connect=10.0),
+        max_retries=0,  # we own retry/backoff below
+        model_kwargs=model_kwargs,
+        extra_body=extra_body or None,
+    )
+
+
+def _to_lc_messages(
+    messages: list[dict[str, str]],
+    model_name: str,
+) -> list[BaseMessage]:
+    last_index = len(messages) - 1
+    lc_messages: list[BaseMessage] = []
+
+    for index, message in enumerate(messages):
+        content = message["content"]
+
+        # Qwen3 thinks by default; triage doesn't need it.
+        if index == last_index and "qwen3" in model_name.lower():
+            content += "\n\n/no_think"
+
+        lc_messages.append(
+            SystemMessage(content=content)
+            if message["role"] == "system"
+            else HumanMessage(content=content)
+        )
+
+    return lc_messages
+
+
+async def _invoke_with_retry(
+    model: ChatOpenAI,
+    messages: list[BaseMessage],
+) -> AIMessage:
     """
     Retry dropped connections, and wait out short 429
     rate-limit windows (per-minute token budgets).
@@ -257,31 +323,29 @@ async def _post_with_retry(
 
     while True:
         try:
-            response = await client.post(
-                url,
-                headers={"Authorization": f"Bearer {api_key}"},
-                json=payload,
-            )
-        except httpx.TransportError:
+            return await model.ainvoke(messages)
+
+        except (ModelConnectionError, ModelTimeoutError):
             transport_failures += 1
 
-            if transport_failures >= attempts:
+            if transport_failures >= TRANSPORT_RETRIES:
                 raise
 
             await asyncio.sleep(2)
-            continue
 
-        if response.status_code != 429 or rate_limit_waits >= RATE_LIMIT_RETRIES:
-            return response
+        except ModelRateLimitError as error:
+            wait = _retry_after_seconds(error)
 
-        wait = _retry_after_seconds(response)
+            if (
+                wait is None
+                or wait > MAX_RATE_LIMIT_WAIT
+                or rate_limit_waits >= RATE_LIMIT_RETRIES
+            ):
+                raise
 
-        if wait is None or wait > MAX_RATE_LIMIT_WAIT:
-            return response
-
-        rate_limit_waits += 1
-        print(f"[LLM] Rate limited; waiting {wait + 1:.0f}s")
-        await asyncio.sleep(wait + 1)
+            rate_limit_waits += 1
+            print(f"[LLM] Rate limited; waiting {wait + 1:.0f}s")
+            await asyncio.sleep(wait + 1)
 
 
 async def chat_json(
@@ -307,81 +371,43 @@ async def chat_json(
 
     errors: list[str] = []
 
-    async with httpx.AsyncClient(
-        timeout=httpx.Timeout(120.0, connect=10.0)
-    ) as client:
+    for provider, model_name in chain:
+        if _cooldown.get(provider.name, 0) > time.monotonic():
+            continue
 
-        for provider, model in chain:
-            if _cooldown.get(provider.name, 0) > time.monotonic():
-                continue
+        label = f"{provider.name}:{model_name}"
+        model = _build_model(provider, model_name, max_tokens, temperature)
+        lc_messages = _to_lc_messages(messages, model_name)
 
-            label = f"{provider.name}:{model}"
+        # One retry on malformed JSON, feeding the error back.
+        for attempt in range(2):
+            try:
+                reply = await _invoke_with_retry(model, lc_messages)
+                content = reply.content or ""
 
-            request_messages = [dict(message) for message in messages]
+            except (ModelError, httpx.HTTPError) as error:
+                status = _error_label(error)
+                errors.append(f"{label}: {status}")
+                print(f"[LLM] {label} failed ({status}); trying next provider")
+                _cooldown[provider.name] = time.monotonic() + COOLDOWN_SECONDS
+                break
 
-            # Qwen3 thinks by default; triage doesn't need it.
-            if "qwen3" in model.lower():
-                request_messages[-1]["content"] += "\n\n/no_think"
+            try:
+                return extract_json(content), label
 
-            # One retry on malformed JSON, feeding the error back.
-            for attempt in range(2):
-                payload: dict[str, Any] = {
-                    "model": model,
-                    "messages": request_messages,
-                    "max_tokens": max_tokens,
-                    "temperature": temperature,
-                }
+            except (ValueError, json.JSONDecodeError) as error:
+                errors.append(f"{label}: bad JSON ({error})")
 
-                if provider.json_mode:
-                    payload["response_format"] = {"type": "json_object"}
-
-                # gpt-oss reasons before answering; its hidden
-                # reasoning tokens count against max_tokens.
-                if "gpt-oss" in model:
-                    payload["reasoning_effort"] = "low"
-
-                try:
-                    response = await _post_with_retry(
-                        client,
-                        f"{provider.base_url}/chat/completions",
-                        provider.api_key,
-                        payload,
-                    )
-                    response.raise_for_status()
-
-                    content = (
-                        response.json()["choices"][0]["message"].get("content")
-                        or ""
-                    )
-
-                except (httpx.HTTPError, KeyError, ValueError) as error:
-                    status = (
-                        error.response.status_code
-                        if isinstance(error, httpx.HTTPStatusError)
-                        else type(error).__name__
-                    )
-                    errors.append(f"{label}: {status}")
-                    print(f"[LLM] {label} failed ({status}); trying next provider")
-                    _cooldown[provider.name] = time.monotonic() + COOLDOWN_SECONDS
-                    break
-
-                try:
-                    return extract_json(content), label
-
-                except (ValueError, json.JSONDecodeError) as error:
-                    errors.append(f"{label}: bad JSON ({error})")
-
-                    if attempt == 0:
-                        request_messages = request_messages + [
-                            {"role": "assistant", "content": content[:4000]},
-                            {
-                                "role": "user",
-                                "content": (
-                                    f"That was not valid JSON ({error}). "
-                                    "Reply again with ONLY the JSON."
-                                ),
-                            },
-                        ]
+                if attempt == 0:
+                    lc_messages = lc_messages + [
+                        AIMessage(content=str(content)[:4000]),
+                        HumanMessage(
+                            content=(
+                                f"That was not valid JSON ({error}). "
+                                "Reply again with ONLY the JSON."
+                            )
+                        ),
+                    ]
 
     raise LLMUnavailable(
         "All LLM providers failed: "

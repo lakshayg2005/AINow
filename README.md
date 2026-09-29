@@ -10,10 +10,11 @@ stories, writes each newsletter section grounded only in what those sources
 say, checks its own numbers and images, and never repeats a story from an
 earlier issue except as a genuine update.
 
-Every text call uses free-tier LLMs (Groq, Cerebras, Gemini, OpenRouter,
-Hugging Face, or a local Ollama model), tried in that order, with an
-extractive fallback if none are reachable — no paid API is required to run
-it.
+Every text call goes through a LangChain fallback chain across free-tier
+LLMs (Groq, Cerebras, Gemini, OpenRouter, Hugging Face, or a local Ollama
+model), tried in that order, with an extractive fallback if none are
+reachable — no paid API is required to run it. The compose loop itself is a
+LangGraph state graph, one node per pipeline step.
 
 ## Features
 
@@ -51,7 +52,10 @@ ainow-backend/    FastAPI + PostgreSQL (pgvector) + SQLAlchemy 2
   app/ingest/      fetch, filter, enrich, chunk + embed sources
   app/stories/     cluster, score, triage, track freshness
   app/compose/     select stories, retrieve context (RAG), write sections,
-                   verify, check images, review, persist
+                   verify, check images, review, persist — orchestrated as
+                   a LangGraph graph (app/compose/graph.py)
+  app/core/free_llm.py  LangChain (ChatOpenAI) fallback chain across
+                         every free-tier provider
   app/services/    email delivery, archive search, publishing
   app/routes/      auth, subscriptions, newsletters, admin API
   app/jobs.py      background pipeline jobs (ingest/compose/deliver)

@@ -16,7 +16,7 @@ import argparse
 import asyncio
 from pathlib import Path
 
-from app.compose.composer import compose_issue
+from app.compose.graph import compose_issue
 from app.compose.persist import save_issue_draft
 from app.core.config import settings
 from app.db.database import SessionLocal, engine

@@ -14,8 +14,12 @@ feedparser
 httpx
 beautifulsoup4
 pillow
-#Models and MCP
+#Models, MCP and LLM orchestration (LangChain/LangGraph)
 huggingface_hub
 mcp
+openai
+langchain-core
+langchain-openai
+langgraph
 #Email delivery
 #resend(instead i used google mail service)
