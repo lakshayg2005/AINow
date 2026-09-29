@@ -80,17 +80,27 @@ def register(
     # -----------------------------------------
     # Send verification email
     # -----------------------------------------
+    # The account already exists at this point (committed
+    # above); a failure here shouldn't crash the request — the
+    # frontend still shows the "Resend Verification" button on
+    # a normal success response, so that's how they retry.
 
-    send_verification_email(
-        user=new_user,
-        token=token,
-    )
+    message = "Account created successfully. Please verify your email."
+
+    try:
+        send_verification_email(
+            user=new_user,
+            token=token,
+        )
+    except Exception as error:
+        print(f"[Auth] Verification email failed for {new_user.email}: {error}")
+        message = (
+            "Account created, but the verification email couldn't be sent "
+            'right now. Use "Resend Verification" below in a moment.'
+        )
 
     return {
-        "message": (
-            "Account created successfully. "
-            "Please verify your email."
-        ),
+        "message": message,
         "email": new_user.email,
     }
 
@@ -262,10 +272,18 @@ def resend_verification(
     # Send email
     # -----------------------------------------
 
-    send_verification_email(
-        user=user,
-        token=token,
-    )
+    try:
+        send_verification_email(
+            user=user,
+            token=token,
+        )
+    except Exception as error:
+        print(f"[Auth] Resend verification email failed for {user.email}: {error}")
+
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Couldn't send the email right now — please try again shortly.",
+        )
 
     mark_resend_sent(
         user.email
